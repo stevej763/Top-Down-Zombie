@@ -11,11 +11,14 @@ export class Input {
   mouseDown = false;
   mousePressed = false;
   wheel = 0;
+  /** Printable characters typed this tick, for text fields. */
+  typed = '';
 
   constructor(private canvas: HTMLCanvasElement, private viewW: number, private viewH: number) {
     window.addEventListener('keydown', (e) => {
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) this.typed += e.key;
       this.down.add(e.code);
     });
     window.addEventListener('keyup', (e) => this.down.delete(e.code));
@@ -59,5 +62,6 @@ export class Input {
     this.pressed.clear();
     this.mousePressed = false;
     this.wheel = 0;
+    this.typed = '';
   }
 }

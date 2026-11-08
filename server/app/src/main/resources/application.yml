@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: boarded-up
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/boardedup}
+    username: ${DB_USER:boardedup}
+    password: ${DB_PASSWORD:boardedup}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+boarded-up:
+  # Origins allowed to call the API directly. The Vite dev server proxies /api, so this is only
+  # needed when the client is served from somewhere else.
+  cors-origins: ${CORS_ORIGINS:http://localhost:5173}
+  # Enables PUT /api/maps/{id} (X-Admin-Token header). Empty disables map uploads.
+  admin-token: ${ADMIN_TOKEN:}
+  # Score submissions per player per minute.
+  score-rate-limit: 6

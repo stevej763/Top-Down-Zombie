@@ -3,10 +3,11 @@ import { Player } from '../entities/Player';
 import { Zombie } from '../entities/Zombie';
 import { drawCrosshair, drawPlayer, drawWindow, drawZombie, renderMap } from '../render/draw';
 import { Lighting } from '../render/lighting';
+import { fetchMap, type MapSummary } from '../net/api';
 import { aimAssist } from '../systems/aimAssist';
 import { ARMOUR_ABSORB } from '../systems/Armour';
 import { Economy, POINTS } from '../systems/Economy';
-import { addScore, loadScores, type ScoreEntry } from '../systems/HighScore';
+import { Leaderboard } from '../systems/HighScore';
 import { Particles } from '../systems/Particles';
 import { FlowField } from '../systems/Pathfinding';
 import { POWERUP_DURATION, POWERUPS, PowerUps, type PowerUpId } from '../systems/PowerUps';
@@ -20,7 +21,7 @@ import { Barricade } from '../world/Barricade';
 import {
   ArmourBench, Door, Interactable, MysteryBox, PerkMachine, UpgradeBench, WallBuy,
 } from '../world/Interactables';
-import { buildMap, type RoomId } from '../world/MapData';
+import { parseMap, type MapDoc, type RoomId } from '../world/MapData';
 import { Tile, TileMap } from '../world/TileMap';
 import { Camera } from './Camera';
 import { Input } from './Input';
@@ -65,9 +66,7 @@ export class Game {
   kills = 0;
   time = 0;
   gameOverTimer = 0;
-  scores: ScoreEntry[] = loadScores();
-  /** Leaderboard position of the last finished run (-1 if it didn't place). */
-  lastRank = -1;
+  readonly scores: Leaderboard;
   /** Big centre-screen callout (power-ups, Second Wind). */
   callout = { text: '', color: '#fff', timer: 0 };
   /** "Now playing" toast. */
@@ -79,7 +78,9 @@ export class Game {
   private last = 0;
   private acc = 0;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  /** `maps` is the server's map list; `mapDoc` is the map New Game plays (changed by `loadMap`). */
+  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], public mapDoc: MapDoc) {
+    this.scores = new Leaderboard(mapDoc.id);
     this.ctx = canvas.getContext('2d')!;
     this.input = new Input(canvas, VIEW_W, VIEW_H);
     this.toMenu();
@@ -88,10 +89,17 @@ export class Game {
     });
     for (const ev of ['keydown', 'mousedown']) window.addEventListener(ev, () => sound.unlock());
     sound.onTrackChange = (t) => { this.nowPlaying = { title: t.title, timer: 5 }; };
+    void this.scores.refresh();
+  }
+
+  /** Fetch a map and make it the one New Game plays. */
+  async loadMap(id: string): Promise<void> {
+    if (id !== this.mapDoc.id) this.mapDoc = await fetchMap(id);
+    this.scores.show(id);
   }
 
   newGame(): void {
-    const data = buildMap();
+    const data = parseMap(this.mapDoc);
     this.map = data.map;
     this.mapCanvas = renderMap(this.map);
     this.barricades = data.windows.map((w) => new Barricade(w));
@@ -116,7 +124,7 @@ export class Game {
     this.interaction = null;
     this.kills = 0;
     this.gameOverTimer = 0;
-    this.lastRank = -1;
+    this.scores.lastRank = -1;
     this.callout.timer = 0;
     this.screenFlash = 0;
     this.state = 'playing';
@@ -124,9 +132,9 @@ export class Game {
 
   /** Back to the title menu, with a fresh (frozen) world behind it. */
   toMenu(): void {
-    const lastRank = this.lastRank;
+    const lastRank = this.scores.lastRank;
     this.newGame();
-    this.lastRank = lastRank;
+    this.scores.lastRank = lastRank;
     this.state = 'menu';
     this.menu.open('title');
   }
@@ -486,7 +494,7 @@ export class Game {
     sound.gameOver();
     const survived = Math.max(0, this.rounds.round - 1);
     if (survived > 0 || this.kills > 0) {
-      this.lastRank = addScore(this.scores, { round: survived, kills: this.kills, points: this.economy.earned, date: Date.now() });
+      void this.scores.record(this.mapDoc.id, { round: survived, kills: this.kills, points: this.economy.earned });
     }
   }
 

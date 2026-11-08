@@ -1,0 +1,5 @@
+*
+!server
+!maps
+server/.gradle
+server/**/build
