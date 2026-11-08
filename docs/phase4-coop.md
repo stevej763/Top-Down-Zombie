@@ -153,8 +153,18 @@ Changes in `server/app` (new package `com.boardedup.game`):
   - `GameSocketIT`: Spring Boot plus Testcontainers. Two `StandardWebSocketClient` sessions create and join a room, start it, send inputs, receive snapshots and events, then one disconnects.
   - A simple **Java bot client** (test helper) that plays from snapshots, used for the IT and for load-trying 10 rooms × 4 bots.
 
-### M3: Client reads a world view instead of sim objects
+### M3: Client reads a world view instead of sim objects ✅ done
 Change only the client, so rendering stops depending on sim classes. The TS sim stays as the data source for now, and the game must play exactly as before.
+
+**As built** (details the plan left open):
+- `view/WorldView.ts` is the snapshot's world, field for field, and `net/protocol.ts` `Snapshot` is now `WorldView` plus `type`, `tick` and `acks`, so M4 can render a snapshot (or an interpolated copy) directly. `WindowView` is just the plank count.
+- The static half is `view/Level.ts`: `buildLevel(doc)` → `{ data: MapData, windows: WindowFixture[], fixtures: Fixture[] }`. A `Fixture` is a discriminated union by `kind` with its stand point (`x`, `y`, equal to the sims' `standX`/`standY`; the smoke run checks this). `WorldView.windows`/`interactables` index `level.windows`/`level.fixtures`.
+- `Game` holds `level`, `world` (rebuilt by `localView(sim, name)` after each `step`, before events are played), `you` (`LOCAL_PLAYER_ID` = 1), `me` (getter) and `result` (`{round, kills, points}` for the game-over screen). Only `Game` and `localView` import sim classes now.
+- Weapon formulas moved to `defs.ts` (`weaponName`, `magSize`, `reserveSize`, `ammoCost`; the TS `Weapon` uses them), along with `PLAYER_RADIUS`, `ZOMBIE_RADIUS`, `BLEEDOUT`, `REVIVE_TIME` (mirrors of the Java constants). `parity.txt` re-records byte-identical.
+- Drawing: `drawPlayer(ctx, p, fx, local)` skips dead players and draws downed ones lying down. `drawPlayerOverlay` runs after lighting: teammates' name tags and the bleed-out ring, with revive progress inside it. Teammates' colours are `TEAM_BODIES[id % 3]` (`render/visuals.ts`), and the local player is drawn last. Lighting gives every alive player a glow, a cone and a muzzle light; downed players get a dimmer glow and no cone.
+- `PlayerFx` is `Map<playerId, PlayerFx>` (`game.playerFxOf(id)`). The TS events have no `player` field yet, so `onEvent` applies them to `you`; M4 switches on `e.player`.
+- Prompts already handle `revive` ("Hold E to revive <name>") and hide the box's take prompt from non-owners.
+- Verified with `npm run build`, `npm run parity` (no diff), and a headless smoke run of both maps: a bot aiming at zombies (view checked against the sim every tick), every event type, every prompt, and a fake co-op world with teammates alive, downed (being revived) and dead, a box owned by someone else, and the local player downed. Not yet checked in a real browser.
 
 - **Define `client/src/view/WorldView.ts`:** plain interfaces shaped like the snapshot (`PlayerView`, `ZombieView`, `WindowView`, `InteractableView`, `DropView`, `RoundView`), plus static map data (`MapData` from `sim/MapData.ts`: windows, wall spots, doors, box, tiles).
 - **Point the readers at the views:** `render/draw.ts`, `render/lighting.ts`, `ui/HUD.ts`, `ui/prompts.ts` and `ui/Screens.ts` take views instead of `GameSim`/`Player`/`Zombie`/`Interactable`.

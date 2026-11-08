@@ -1,16 +1,18 @@
 import { VIEW_H, VIEW_W, type Game } from '../core/Game';
 import { sound } from '../audio/Sound';
 import { PERK_VISUALS } from '../render/visuals';
-import { ARMOUR_LEVELS, PERK_ORDER } from '../sim/defs';
+import { ARMOUR_LEVELS, magSize, PERK_ORDER, weaponName } from '../sim/defs';
+import { heldWeapon } from '../view/WorldView';
 import { interactionPrompt } from './prompts';
 import { DISPLAY_FONT, shadowText } from './text';
 
 export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
-  const { sim } = game;
-  const { player, economy, rounds, powerUps } = sim;
+  const { world, level } = game;
+  const { round: rounds, powerUps } = world;
+  const player = game.me;
 
   // Damage vignette.
-  const a = Math.min(0.85, (1 - player.hp / player.maxHp) * 0.7 + game.playerFx.hurtFlash * 0.35);
+  const a = Math.min(0.85, (1 - player.hp / player.maxHp) * 0.7 + game.playerFxOf(player.id).hurtFlash * 0.35);
   if (a > 0.01) {
     const g = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.3, VIEW_W / 2, VIEW_H / 2, VIEW_W * 0.65);
     g.addColorStop(0, 'rgba(120, 0, 0, 0)');
@@ -20,14 +22,14 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   }
 
   // Round number + status.
-  if (rounds.round > 0) shadowText(ctx, String(rounds.round), 24, 12, `64px ${DISPLAY_FONT}`, '#a01212', 'left', 'top');
+  if (rounds.n > 0) shadowText(ctx, String(rounds.n), 24, 12, `64px ${DISPLAY_FONT}`, '#a01212', 'left', 'top');
   const status = rounds.active
-    ? `${rounds.remaining(sim)} zombies left`
-    : `${rounds.round > 0 ? 'Next round' : 'Get ready'} in ${Math.ceil(rounds.intermission)}`;
+    ? `${rounds.remaining} zombies left`
+    : `${rounds.n > 0 ? 'Next round' : 'Get ready'} in ${Math.ceil(rounds.intermission)}`;
   shadowText(ctx, status, 26, 90, '14px monospace', '#c8c8c8', 'left', 'top');
 
   // Points, health, armour and perks, bottom-left.
-  shadowText(ctx, String(economy.points), 24, VIEW_H - 48, `32px ${DISPLAY_FONT}`, economy.multiplier > 1 ? '#ffe880' : '#f2d15c');
+  shadowText(ctx, String(player.points), 24, VIEW_H - 48, `32px ${DISPLAY_FONT}`, powerUps.double > 0 ? '#ffe880' : '#f2d15c');
   const barW = 160 * (player.maxHp / 100) ** 0.5;
   ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
   ctx.fillRect(24, VIEW_H - 38, barW, 8);
@@ -43,7 +45,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   }
   let px = 24;
   for (const id of PERK_ORDER) {
-    if (!player.perks.has(id)) continue;
+    if (!player.perks.includes(id)) continue;
     const perk = PERK_VISUALS[id];
     ctx.fillStyle = perk.color;
     ctx.fillRect(px, VIEW_H - 100, 22, 22);
@@ -55,26 +57,26 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   }
 
   // Weapon + ammo, bottom-right.
-  const w = player.weapon;
+  const w = heldWeapon(player);
   const right = VIEW_W - 24;
-  shadowText(ctx, w.name.toUpperCase(), right, VIEW_H - 74, `18px ${DISPLAY_FONT}`, '#e0e0e0', 'right');
+  shadowText(ctx, weaponName(w.id, w.tier).toUpperCase(), right, VIEW_H - 74, `18px ${DISPLAY_FONT}`, '#e0e0e0', 'right');
   const ammoColor = w.mag === 0 ? '#d03030' : '#ffffff';
   shadowText(ctx, `/ ${w.reserve}`, right, VIEW_H - 24, '20px monospace', '#b0b0b0', 'right');
   ctx.font = '20px monospace';
   const reserveW = ctx.measureText(`/ ${w.reserve}`).width;
   shadowText(ctx, String(w.mag), right - reserveW - 8, VIEW_H - 24, `38px ${DISPLAY_FONT}`, ammoColor, 'right');
-  const other = player.otherWeapon;
-  if (other) shadowText(ctx, `[Q] ${other.name}`, right, VIEW_H - 100, '13px monospace', '#8a8a8a', 'right');
+  const other = player.weapons[1 - player.slot];
+  if (other) shadowText(ctx, `[Q] ${weaponName(other.id, other.tier)}`, right, VIEW_H - 100, '13px monospace', '#8a8a8a', 'right');
 
   // Reload / ammo warnings, under the crosshair area.
   let warn = '';
-  if (w.reloading) drawReloadBar(ctx, w.reloadProgress);
+  if (w.reloadProgress > 0) drawReloadBar(ctx, w.reloadProgress);
   else if (w.mag === 0 && w.reserve === 0) warn = 'NO AMMO - KNIFE';
-  else if (w.mag <= Math.ceil(w.magSize * 0.25)) warn = 'Press R to reload';
+  else if (w.mag <= Math.ceil(magSize(w.id, w.tier) * 0.25)) warn = 'Press R to reload';
   if (warn) shadowText(ctx, warn, VIEW_W / 2, VIEW_H / 2 + 60, 'bold 16px monospace', warn.startsWith('NO AMMO') ? '#d03030' : '#ffffff', 'center');
 
   // Interaction prompt.
-  const prompt = interactionPrompt(sim, player.interaction);
+  const prompt = interactionPrompt(level, world, player);
   if (prompt) {
     ctx.font = '16px monospace';
     const tw = ctx.measureText(prompt.text).width;

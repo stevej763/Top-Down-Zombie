@@ -1,4 +1,4 @@
-import { MAX_TIER, UPGRADE, type WeaponDef } from './defs';
+import { ammoCost, magSize, MAX_TIER, reserveSize, UPGRADE, weaponName, type WeaponDef } from './defs';
 
 export class Weapon {
   tier = 0;
@@ -14,7 +14,7 @@ export class Weapon {
   }
 
   get name(): string {
-    return this.def.name + UPGRADE.suffix[this.tier];
+    return weaponName(this.def.id, this.tier);
   }
 
   get damage(): number {
@@ -22,16 +22,15 @@ export class Weapon {
   }
 
   get magSize(): number {
-    return Math.round(this.def.mag * UPGRADE.ammo[this.tier]);
+    return magSize(this.def.id, this.tier);
   }
 
   get reserveSize(): number {
-    return Math.round(this.def.reserve * UPGRADE.ammo[this.tier]);
+    return reserveSize(this.def.id, this.tier);
   }
 
-  /** Upgraded weapons cost more to refill at the wall. */
   get ammoCost(): number {
-    return this.def.ammoCost * (1 + this.tier * 2);
+    return ammoCost(this.def.id, this.tier);
   }
 
   /** 0..1 through the current reload. */

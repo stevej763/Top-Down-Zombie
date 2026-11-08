@@ -1,5 +1,5 @@
 import type { PerkId, PowerUpId, WeaponId } from '../sim/defs';
-import type { Interactable, PerkMachine } from '../sim/Interactables';
+import type { Fixture } from '../view/Level';
 
 /** Visual-only tuning: everything here is cosmetic, so it stays out of shared/defs. */
 
@@ -60,10 +60,10 @@ function hexToRgb(hex: string): string {
 }
 
 /** Coloured light an interactable casts in the dark ("r, g, b"), if any. */
-export function glowOf(it: Interactable): string | null {
+export function glowOf(it: Fixture): string | null {
   switch (it.kind) {
     case 'wallBuy': return '200, 200, 190';
-    case 'perk': return hexToRgb(PERK_VISUALS[(it as PerkMachine).perk.id].color);
+    case 'perk': return hexToRgb(PERK_VISUALS[it.perk].color);
     case 'armour': return '90, 140, 220';
     case 'upgrade': return '170, 80, 230';
     case 'box': return '240, 190, 70';
@@ -71,7 +71,15 @@ export function glowOf(it: Interactable): string | null {
   }
 }
 
-/** Client-side animation state for the local player, driven by sim events. */
+/** Body colour of the local player, and of teammates (picked by player id). */
+export const LOCAL_BODY = { fill: '#2e5d8c', stroke: '#132a42' };
+export const TEAM_BODIES = [
+  { fill: '#8c3a2e', stroke: '#421813' },
+  { fill: '#3a7d45', stroke: '#14361b' },
+  { fill: '#8c7a2e', stroke: '#423813' },
+];
+
+/** Client-side animation state for one player, driven by sim events. `hurtFlash` is only used for the local player. */
 export interface PlayerFx {
   /** Muzzle-flash timer. */
   flash: number;

@@ -1,5 +1,6 @@
 import { dist, lerp, turnToward } from '../core/math';
 import type { Barricade } from './Barricade';
+import { ZOMBIE_RADIUS } from './defs';
 import type { GameSim } from './GameSim';
 import { Player } from './Player';
 import { Tile, type TileType } from './TileMap';
@@ -16,7 +17,7 @@ const outsideSolid = (t: TileType) => t !== Tile.Outside;
 const insideSolid = (t: TileType) => t !== Tile.Floor;
 
 export class Zombie {
-  static readonly RADIUS = 13;
+  static readonly RADIUS = ZOMBIE_RADIUS;
 
   state: ZombieState = 'outside';
   facing: number;

@@ -102,3 +102,29 @@ export const POWERUP_TUNING = {
   duration: powerUpsJson.duration,
   pickupRadius: powerUpsJson.pickupRadius,
 };
+
+/** A weapon's display name at an upgrade tier, e.g. "Shotgun Mk II". */
+export function weaponName(id: WeaponId, tier: number): string {
+  return WEAPONS[id].name + UPGRADE.suffix[tier];
+}
+
+export function magSize(id: WeaponId, tier: number): number {
+  return Math.round(WEAPONS[id].mag * UPGRADE.ammo[tier]);
+}
+
+export function reserveSize(id: WeaponId, tier: number): number {
+  return Math.round(WEAPONS[id].reserve * UPGRADE.ammo[tier]);
+}
+
+/** Upgraded weapons cost more to refill at the wall. */
+export function ammoCost(id: WeaponId, tier: number): number {
+  return WEAPONS[id].ammoCost * (1 + tier * 2);
+}
+
+// Constants that live in code in the Java sim (Player, Zombie), mirrored for the client.
+export const PLAYER_RADIUS = 12;
+export const ZOMBIE_RADIUS = 13;
+/** Seconds a downed co-op player lasts before bleeding out (Player.BLEEDOUT). */
+export const BLEEDOUT = 30;
+/** Seconds of holding E to revive a teammate (Player.REVIVE_TIME). */
+export const REVIVE_TIME = 3;

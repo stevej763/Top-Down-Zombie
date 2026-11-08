@@ -1,6 +1,7 @@
 import type { PerkId, PowerUpId, WeaponId } from '../sim/defs';
 import type { PlayerInput } from '../sim/input';
 import type { MapDoc } from '../sim/MapData';
+import type { WorldView } from '../view/WorldView';
 
 /**
  * The /ws protocol: JSON messages with a `type` field. Mirrors the Java records in
@@ -62,83 +63,12 @@ export type ServerMessage =
 
 // ----------------------------------------------------------------- snapshot (20 Hz)
 
-export type PlayerState = 'alive' | 'downed' | 'dead';
-export type ZombieStateName = 'outside' | 'breaching' | 'climbing' | 'inside';
-export type BoxState = 'closed' | 'rolling' | 'ready';
-
-export interface WeaponSnap {
-  id: WeaponId;
-  tier: number;
-  mag: number;
-  reserve: number;
-  /** 0..1, 0 when not reloading. */
-  reloadProgress: number;
-}
-
-/** `window` and `target` index the snapshot's `windows` and `interactables`. */
-export type InteractionSnap =
-  | { kind: 'rebuild'; window: number }
-  | { kind: 'use'; target: number }
-  | { kind: 'revive'; player: number };
-
-export interface PlayerSnap {
-  id: number;
-  name: string;
-  x: number;
-  y: number;
-  aim: number;
-  hp: number;
-  maxHp: number;
-  state: PlayerState;
-  /** Seconds left before a downed player dies. */
-  bleedout: number;
-  /** Seconds of reviving so far (3 to finish). */
-  reviveProgress: number;
-  armour: number;
-  armourLevel: number;
-  points: number;
-  kills: number;
-  slot: number;
-  /** Always two entries; an empty slot is null. */
-  weapons: [WeaponSnap | null, WeaponSnap | null];
-  perks: PerkId[];
-  invuln: number;
-  interaction: InteractionSnap | null;
-}
-
-export interface ZombieSnap {
-  id: number;
-  x: number;
-  y: number;
-  facing: number;
-  state: ZombieStateName;
-  runner: boolean;
-}
-
-/** Doors carry `open`; the box carries its state; everything else is `{}`. */
-export interface InteractableSnap {
-  open?: boolean;
-  state?: BoxState;
-  shown?: WeaponId;
-  timer?: number;
-  /** Player id who paid for the roll, or -1. */
-  owner?: number;
-}
-
-/** Floats are rounded to 2 decimals. */
-export interface Snapshot {
+/** The world fields are `WorldView` (view/WorldView.ts), so a snapshot can be rendered as is. Floats are rounded to 2 decimals. */
+export interface Snapshot extends WorldView {
   type: 'snapshot';
   tick: number;
   /** Player id (as a string key) → last input seq applied. */
   acks: Record<string, number>;
-  round: { n: number; active: boolean; remaining: number; intermission: number };
-  powerUps: { instakill: number; double: number; drops: { id: PowerUpId; x: number; y: number; life: number }[] };
-  players: PlayerSnap[];
-  zombies: ZombieSnap[];
-  /** Plank counts, in map order. */
-  windows: number[];
-  /** In GameSim order: wall buys, perks, armour, upgrade, box, doors. */
-  interactables: InteractableSnap[];
 }
 
 // ----------------------------------------------------------------- events

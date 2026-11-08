@@ -1,23 +1,26 @@
 import { sound } from '../audio/Sound';
-import { fetchMap, type MapSummary } from '../net/api';
+import { fetchMap, loadIdentity, type MapSummary } from '../net/api';
 import {
-  drawCrosshair, drawInteractable, drawInteractableOverlay, drawPlayer, drawPowerUps, drawWindow, drawZombie, renderMap,
+  drawCrosshair, drawInteractable, drawInteractableOverlay, drawPlayer, drawPlayerOverlay, drawPowerUps, drawWindow,
+  drawZombie, renderMap,
 } from '../render/draw';
 import { Lighting } from '../render/lighting';
 import {
   PERK_VISUALS, POWERUP_VISUALS, TIER_HALO, WEAPON_FX, type PlayerFx, type ZombieFx,
 } from '../render/visuals';
-import { KNIFE, PERKS, POWERUPS, UPGRADE, WEAPONS, type WeaponId } from '../sim/defs';
+import { KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../sim/defs';
 import type { SimEvent } from '../sim/events';
 import { GameSim } from '../sim/GameSim';
 import type { PlayerInput } from '../sim/input';
 import type { MapDoc } from '../sim/MapData';
-import { Player } from '../sim/Player';
 import { Leaderboard } from '../systems/HighScore';
 import { Particles } from '../systems/Particles';
 import { drawHUD } from '../ui/HUD';
 import { Menu } from '../ui/Menu';
 import { drawGameOver } from '../ui/Screens';
+import { buildLevel, type Level } from '../view/Level';
+import { LOCAL_PLAYER_ID, localView } from '../view/localView';
+import { heldWeapon, type PlayerView, type WorldView } from '../view/WorldView';
 import { Camera } from './Camera';
 import { Input } from './Input';
 import { dist, rand, TAU } from './math';
@@ -34,7 +37,8 @@ export type GameState = 'menu' | 'playing' | 'paused' | 'gameover';
 /**
  * The browser client: owns the canvas, input, camera, particles, audio, menus and HUD, and
  * drives a `GameSim`. Everything gameplay happens in the sim; this turns the keyboard and
- * mouse into `PlayerInput` and the sim's events into sound and effects.
+ * mouse into `PlayerInput` and the sim's events into sound and effects. Rendering, the HUD
+ * and prompts read only `world` (a `WorldView`, rebuilt from the sim each tick) and `level`.
  */
 export class Game {
   state: GameState = 'menu';
@@ -44,11 +48,19 @@ export class Game {
   private readonly lighting = new Lighting(VIEW_W, VIEW_H);
 
   sim!: GameSim;
+  /** The static map: tiles, window and fixture positions. */
+  level!: Level;
+  /** What's drawn: the world as of the last tick. */
+  world!: WorldView;
+  /** The local player's id in `world.players`. */
+  you = LOCAL_PLAYER_ID;
   private mapCanvas!: HTMLCanvasElement;
   particles!: Particles;
   camera!: Camera;
-  playerFx: PlayerFx = { flash: 0, hurtFlash: 0, knifeSwing: 0 };
+  private playerFx = new Map<number, PlayerFx>();
   private zombieFx = new Map<number, ZombieFx>();
+  /** The finished game, for the game-over screen. */
+  result = { round: 0, kills: 0, points: 0 };
 
   time = 0;
   gameOverTimer = 0;
@@ -88,12 +100,14 @@ export class Game {
 
   newGame(): void {
     this.sim = new GameSim(this.mapDoc, (Math.random() * 2 ** 32) >>> 0);
-    const map = this.sim.map;
+    this.level = buildLevel(this.mapDoc);
+    this.world = localView(this.sim, loadIdentity()?.name ?? '');
+    const map = this.level.data.map;
     this.mapCanvas = renderMap(map);
     this.particles = new Particles(map.pxW, map.pxH);
     this.camera = new Camera(VIEW_W, VIEW_H, map.pxW, map.pxH);
-    this.camera.snap(this.sim.player.x, this.sim.player.y);
-    this.playerFx = { flash: 0, hurtFlash: 0, knifeSwing: 0 };
+    this.camera.snap(this.me.x, this.me.y);
+    this.playerFx.clear();
     this.zombieFx.clear();
     this.gameOverTimer = 0;
     this.scores.lastRank = -1;
@@ -110,6 +124,20 @@ export class Game {
     this.scores.lastRank = lastRank;
     this.state = 'menu';
     this.menu.open('title');
+  }
+
+  /** The local player. */
+  get me(): PlayerView {
+    return this.world.players.find((p) => p.id === this.you) ?? this.world.players[0];
+  }
+
+  playerFxOf(id: number): PlayerFx {
+    let fx = this.playerFx.get(id);
+    if (!fx) {
+      fx = { flash: 0, hurtFlash: 0, knifeSwing: 0 };
+      this.playerFx.set(id, fx);
+    }
+    return fx;
   }
 
   pause(): void {
@@ -170,6 +198,7 @@ export class Game {
           break;
         }
         this.sim.step(dt, this.readInput());
+        this.world = localView(this.sim, this.me.name);
         for (const e of this.sim.events) this.onEvent(e);
         this.sim.events.length = 0;
         this.updateEffects(dt);
@@ -180,7 +209,7 @@ export class Game {
 
   private readInput(): PlayerInput {
     const inp = this.input;
-    const p = this.sim.player;
+    const p = this.me;
     const mx = inp.mouse.x + this.camera.x;
     const my = inp.mouse.y + this.camera.y;
     return {
@@ -200,17 +229,18 @@ export class Game {
 
   /** Cosmetic timers: particles, camera, flashes, banners. */
   private updateEffects(dt: number): void {
-    const fx = this.playerFx;
-    fx.flash = Math.max(0, fx.flash - dt);
-    fx.hurtFlash = Math.max(0, fx.hurtFlash - dt * 2);
-    fx.knifeSwing = Math.max(0, fx.knifeSwing - dt);
-    for (const z of this.sim.zombies) {
+    for (const fx of this.playerFx.values()) {
+      fx.flash = Math.max(0, fx.flash - dt);
+      fx.hurtFlash = Math.max(0, fx.hurtFlash - dt * 2);
+      fx.knifeSwing = Math.max(0, fx.knifeSwing - dt);
+    }
+    for (const z of this.world.zombies) {
       const zf = this.fxOf(z.id);
       zf.hitFlash = Math.max(0, zf.hitFlash - dt);
       zf.wobble += dt * (z.runner ? 14 : 6);
     }
     this.particles.update(dt);
-    this.camera.follow(this.sim.player.x, this.sim.player.y, dt);
+    this.camera.follow(this.me.x, this.me.y, dt);
     this.callout.timer = Math.max(0, this.callout.timer - dt);
     this.banner.timer = Math.max(0, this.banner.timer - dt);
     this.nowPlaying.timer = Math.max(0, this.nowPlaying.timer - dt);
@@ -228,7 +258,7 @@ export class Game {
   }
 
   private updateGroans(dt: number): void {
-    const zs = this.sim.zombies;
+    const zs = this.world.zombies;
     this.groanTimer -= dt;
     if (this.groanTimer > 0 || zs.length === 0) return;
     const z = zs[Math.floor(rand(0, zs.length))];
@@ -238,7 +268,7 @@ export class Game {
 
   /** 0..1 loudness for a sound at a world position, by distance from the player. */
   private volumeAt(x: number, y: number): number {
-    const p = this.sim.player;
+    const p = this.me;
     return Math.max(0, 1 - dist(x, y, p.x, p.y) / HEARING_RANGE);
   }
 
@@ -252,7 +282,7 @@ export class Game {
 
   /** Floating text above the player. */
   private playerText(text: string, color: string): void {
-    const p = this.sim.player;
+    const p = this.me;
     this.particles.text(text, p.x, p.y - 20, color);
   }
 
@@ -264,7 +294,7 @@ export class Game {
       case 'shot': {
         const wfx = WEAPON_FX[e.weapon];
         if (wfx.casing) this.particles.casing(e.x + Math.cos(e.aim) * 12, e.y + Math.sin(e.aim) * 12, e.aim, wfx.casing);
-        this.playerFx.flash = 0.05;
+        this.playerFxOf(this.you).flash = 0.05;
         this.camera.addShake(wfx.shake);
         sound.shot(e.weapon);
         break;
@@ -275,7 +305,7 @@ export class Game {
         const len = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
         const dx = len > 0 ? (e.x2 - e.x1) / len : 0;
         const dy = len > 0 ? (e.y2 - e.y1) / len : 0;
-        const m = Math.min(len, Player.RADIUS + wfx.barrel + 6);
+        const m = Math.min(len, PLAYER_RADIUS + wfx.barrel + 6);
         this.particles.tracer(e.x1 + dx * m, e.y1 + dy * m, e.x2, e.y2, wfx, TIER_HALO[e.tier]);
         // Back the mark off the wall face so it sits on the visible side.
         if (e.hitWall) this.particles.impact(e.x2 - dx * 1.5, e.y2 - dy * 1.5, Math.atan2(dy, dx) + Math.PI, wfx.tracer);
@@ -291,7 +321,7 @@ export class Game {
         this.fxOf(e.zombie).hitFlash = 0.08;
         this.particles.blood(e.x, e.y, e.angle, 6);
         if (e.points > 0) {
-          const z = this.sim.zombies.find((z) => z.id === e.zombie);
+          const z = this.world.zombies.find((z) => z.id === e.zombie);
           pts(e.points, z?.x ?? e.x, (z?.y ?? e.y) - 16);
           sound.hit();
         }
@@ -304,7 +334,7 @@ export class Game {
         this.zombieFx.delete(e.zombie);
         break;
       case 'knife':
-        this.playerFx.knifeSwing = KNIFE.swing;
+        this.playerFxOf(this.you).knifeSwing = KNIFE.swing;
         sound.knife(e.hit);
         if (e.hit) this.camera.addShake(2);
         break;
@@ -312,7 +342,7 @@ export class Game {
         sound.reload();
         break;
       case 'playerHurt':
-        this.playerFx.hurtFlash = 1;
+        this.playerFxOf(this.you).hurtFlash = 1;
         this.camera.addShake(7);
         this.particles.blood(e.x, e.y, rand(0, TAU), 8);
         sound.hurt();
@@ -390,17 +420,15 @@ export class Game {
     this.state = 'gameover';
     this.gameOverTimer = 0;
     sound.gameOver();
-    const survived = Math.max(0, this.sim.rounds.round - 1);
-    if (survived > 0 || this.sim.kills > 0) {
-      void this.scores.record(this.mapDoc.id, { round: survived, kills: this.sim.kills, points: this.sim.economy.earned });
-    }
+    this.result = { round: Math.max(0, this.sim.rounds.round - 1), kills: this.sim.kills, points: this.sim.economy.earned };
+    if (this.result.round > 0 || this.result.kills > 0) void this.scores.record(this.mapDoc.id, this.result);
   }
 
   // ---------------------------------------------------------------- render
 
   private render(): void {
     const ctx = this.ctx;
-    const sim = this.sim;
+    const { level, world } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -412,20 +440,23 @@ export class Game {
     ctx.translate(-cx, -cy);
     ctx.drawImage(this.mapCanvas, 0, 0);
     this.particles.drawDecals(ctx);
-    for (const it of sim.interactables) drawInteractable(ctx, it, this.time);
-    for (const b of sim.barricades) drawWindow(ctx, b);
-    for (const z of sim.zombies) drawZombie(ctx, z, this.fxOf(z.id), sim.rounds.round);
-    drawPlayer(ctx, sim.player, this.playerFx);
+    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time));
+    level.windows.forEach((w, i) => drawWindow(ctx, w, world.windows[i]));
+    for (const z of world.zombies) drawZombie(ctx, z, this.fxOf(z.id), world.round.n);
+    // The local player on top of teammates.
+    const players = [...world.players].sort((a, b) => Number(a.id === this.you) - Number(b.id === this.you));
+    for (const p of players) drawPlayer(ctx, p, this.playerFxOf(p.id), p.id === this.you);
     this.particles.draw(ctx);
     ctx.restore();
 
-    this.lighting.draw(ctx, this, cx, cy);
+    this.lighting.draw(ctx, level, world, (id) => this.playerFxOf(id), cx, cy);
 
     ctx.save();
     ctx.translate(-cx, -cy);
     this.particles.drawGlow(ctx);
-    drawPowerUps(ctx, sim.powerUps.drops, this.time);
-    for (const it of sim.interactables) drawInteractableOverlay(ctx, it, this.time);
+    drawPowerUps(ctx, world.powerUps.drops, this.time);
+    level.fixtures.forEach((f, i) => drawInteractableOverlay(ctx, f, world.interactables[i], this.time));
+    for (const p of players) drawPlayerOverlay(ctx, p, p.id === this.you, this.time);
     this.particles.drawTexts(ctx);
     ctx.restore();
 
@@ -437,13 +468,9 @@ export class Game {
     if (this.state !== 'menu') drawHUD(ctx, this);
     if (this.state === 'menu' || this.state === 'paused') this.menu.draw(ctx, this);
     else if (this.state === 'gameover') drawGameOver(ctx, this);
-    else drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, sim.player.weapon.def.pellets > 1 ? 10 : 5);
+    else drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, WEAPONS[heldWeapon(this.me).id].pellets > 1 ? 10 : 5);
 
     const cursor = this.state === 'playing' ? 'none' : 'default';
     if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;
   }
-}
-
-function weaponName(id: WeaponId, tier: number): string {
-  return WEAPONS[id].name + UPGRADE.suffix[tier];
 }

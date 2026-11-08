@@ -1,5 +1,5 @@
 import { dist } from '../core/math';
-import { KNIFE, PERK_EFFECTS, STARTER_WEAPON, WEAPONS, type PerkId, type WeaponId } from './defs';
+import { KNIFE, PERK_EFFECTS, PLAYER_RADIUS, STARTER_WEAPON, WEAPONS, type PerkId, type WeaponId } from './defs';
 import type { GameSim, Interaction } from './GameSim';
 import type { PlayerInput } from './input';
 import { MAX_PLANKS } from './Barricade';
@@ -13,7 +13,7 @@ const REGEN_DELAY = 4;
 const REGEN_RATE = 40;
 
 export class Player {
-  static readonly RADIUS = 12;
+  static readonly RADIUS = PLAYER_RADIUS;
   static readonly SPEED = 165;
   static readonly BASE_HP = 100;
 
