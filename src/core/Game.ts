@@ -6,13 +6,14 @@ import { Lighting } from '../render/lighting';
 import { aimAssist } from '../systems/aimAssist';
 import { ARMOUR_ABSORB } from '../systems/Armour';
 import { Economy, POINTS } from '../systems/Economy';
-import { loadBest, saveBest, type Best } from '../systems/HighScore';
+import { addScore, loadScores, type ScoreEntry } from '../systems/HighScore';
 import { Particles } from '../systems/Particles';
 import { FlowField } from '../systems/Pathfinding';
 import { POWERUP_DURATION, POWERUPS, PowerUps, type PowerUpId } from '../systems/PowerUps';
 import { RoundManager } from '../systems/RoundManager';
 import { drawHUD } from '../ui/HUD';
-import { drawGameOver, drawPause, drawTitle } from '../ui/Screens';
+import { Menu } from '../ui/Menu';
+import { drawGameOver } from '../ui/Screens';
 import type { Weapon } from '../weapons/Weapon';
 import { KNIFE, WEAPONS } from '../weapons/WeaponDefs';
 import { Barricade } from '../world/Barricade';
@@ -41,6 +42,7 @@ export type Interaction =
 export class Game {
   state: GameState = 'menu';
   readonly input: Input;
+  readonly menu = new Menu();
   private readonly ctx: CanvasRenderingContext2D;
   private readonly lighting = new Lighting(VIEW_W, VIEW_H);
 
@@ -63,8 +65,9 @@ export class Game {
   kills = 0;
   time = 0;
   gameOverTimer = 0;
-  best: Best = loadBest();
-  newBest = false;
+  scores: ScoreEntry[] = loadScores();
+  /** Leaderboard position of the last finished run (-1 if it didn't place). */
+  lastRank = -1;
   /** Big centre-screen callout (power-ups, Second Wind). */
   callout = { text: '', color: '#fff', timer: 0 };
   /** "Now playing" toast. */
@@ -79,10 +82,9 @@ export class Game {
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
     this.input = new Input(canvas, VIEW_W, VIEW_H);
-    this.newGame();
-    this.state = 'menu';
+    this.toMenu();
     window.addEventListener('blur', () => {
-      if (this.state === 'playing') this.state = 'paused';
+      if (this.state === 'playing') this.pause();
     });
     for (const ev of ['keydown', 'mousedown']) window.addEventListener(ev, () => sound.unlock());
     sound.onTrackChange = (t) => { this.nowPlaying = { title: t.title, timer: 5 }; };
@@ -114,9 +116,27 @@ export class Game {
     this.interaction = null;
     this.kills = 0;
     this.gameOverTimer = 0;
-    this.newBest = false;
+    this.lastRank = -1;
     this.callout.timer = 0;
     this.screenFlash = 0;
+    this.state = 'playing';
+  }
+
+  /** Back to the title menu, with a fresh (frozen) world behind it. */
+  toMenu(): void {
+    const lastRank = this.lastRank;
+    this.newGame();
+    this.lastRank = lastRank;
+    this.state = 'menu';
+    this.menu.open('title');
+  }
+
+  pause(): void {
+    this.state = 'paused';
+    this.menu.open('pause');
+  }
+
+  resume(): void {
     this.state = 'playing';
   }
 
@@ -146,24 +166,27 @@ export class Game {
     this.time += dt;
     const inp = this.input;
     if (inp.wasPressed('KeyM')) sound.toggleMute();
-    if (this.state === 'playing') sound.startMusic();
-    sound.setMusicPaused(this.state === 'paused');
+    sound.startMusic();
+    // Keep the music audible on the audio page so the slider can be judged.
+    sound.setMusicPaused(this.state === 'paused' && this.menu.page !== 'audio');
     switch (this.state) {
       case 'menu':
-        if (inp.wasPressed('Enter', 'Space') || inp.mousePressed) this.newGame();
-        break;
       case 'paused':
-        if (inp.wasPressed('Escape', 'KeyP') || inp.mousePressed) this.state = 'playing';
+        if (this.state === 'paused' && inp.wasPressed('KeyP')) this.resume();
+        else this.menu.update(this);
         break;
       case 'gameover':
         this.gameOverTimer += dt;
         this.particles.update(dt);
         this.camera.follow(this.player.x, this.player.y, dt);
-        if (this.gameOverTimer > 1.5 && (inp.wasPressed('Enter') || inp.mousePressed)) this.newGame();
+        if (this.gameOverTimer > 1.5) {
+          if (inp.wasPressed('Enter') || inp.mousePressed) this.newGame();
+          else if (inp.wasPressed('Escape')) this.toMenu();
+        }
         break;
       case 'playing':
         if (inp.wasPressed('Escape', 'KeyP')) {
-          this.state = 'paused';
+          this.pause();
           break;
         }
         this.updateWorld(dt);
@@ -459,10 +482,8 @@ export class Game {
     this.gameOverTimer = 0;
     sound.gameOver();
     const survived = Math.max(0, this.rounds.round - 1);
-    if (survived > this.best.round || (survived === this.best.round && this.kills > this.best.kills)) {
-      this.best = { round: survived, kills: this.kills };
-      this.newBest = true;
-      saveBest(this.best);
+    if (survived > 0 || this.kills > 0) {
+      this.lastRank = addScore(this.scores, { round: survived, kills: this.kills, points: this.economy.earned, date: Date.now() });
     }
   }
 
@@ -544,8 +565,7 @@ export class Game {
     }
 
     if (this.state !== 'menu') drawHUD(ctx, this);
-    if (this.state === 'menu') drawTitle(ctx, this);
-    else if (this.state === 'paused') drawPause(ctx);
+    if (this.state === 'menu' || this.state === 'paused') this.menu.draw(ctx, this);
     else if (this.state === 'gameover') drawGameOver(ctx, this);
     else drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, this.player.weapon.def.pellets > 1 ? 10 : 5);
 

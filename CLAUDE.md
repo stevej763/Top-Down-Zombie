@@ -32,11 +32,12 @@ There is no test suite or linter. `npm run build` must pass with zero type error
 | `systems/Pathfinding.ts` | BFS flow field from the player's tile over `Floor`. Call `invalidate()` after the map changes (doors) |
 | `systems/aimAssist.ts` | ±8° assist cone (`AIM_ASSIST_CONE`; 0 disables it). Leaves shots that would already hit untouched |
 | `systems/Economy.ts` | Points, `award()` (applies the Double Points multiplier) vs `spend()`, the per-round cap on rebuild points, `POINTS` table |
-| `systems/Perks.ts`, `Armour.ts`, `PowerUps.ts`, `HighScore.ts`, `Particles.ts` | Data tables and small systems. High score is in localStorage under `boarded-up-best` |
+| `systems/Perks.ts`, `Armour.ts`, `PowerUps.ts`, `HighScore.ts`, `Particles.ts` | Data tables and small systems. `HighScore.ts` keeps a top-10 table in localStorage under `boarded-up-scores` (migrates the old single `boarded-up-best`) |
 | `weapons/WeaponDefs.ts` | **Weapon stat table**, `BOX_POOL`, and the `KNIFE` constants. `weapons/Weapon.ts` holds per-instance ammo, reload state and upgrade tier (0–2), plus the derived stats (`damage`, `magSize`, `name`, ...) |
 | `render/draw.ts` | All procedural drawing: map pre-render, zombies, player, windows, machines. `render/lighting.ts` draws the darkness overlay with punched-out lights and the coloured machine glows |
-| `ui/HUD.ts`, `ui/Screens.ts`, `ui/text.ts` | HUD (round, points, ammo, perks, armour, prompts, banners, now-playing toast) and the title/pause/game-over screens |
-| `audio/Sound.ts` | A singleton `sound` that synthesizes every SFX and plays the shuffled soundtrack. The AudioContext is created lazily on the first user gesture (`unlock()`). `audio/tracks.ts` lists the soundtrack files |
+| `ui/Menu.ts` | Title and pause menus: pages (main / high scores / audio / controls) of buttons, sliders and toggles, keyboard and mouse driven. Item rects come from one `rects()` used by both update and draw |
+| `ui/HUD.ts`, `ui/Screens.ts`, `ui/text.ts` | HUD (round, points, ammo, perks, armour, prompts, banners, now-playing toast) and the game-over screen |
+| `audio/Sound.ts` | A singleton `sound` that synthesizes every SFX and plays the shuffled soundtrack. The AudioContext is created lazily on the first user gesture (`unlock()`). Master/music/effects volumes and mute persist under `boarded-up-audio`; SFX go through their own gain bus. `audio/tracks.ts` lists the soundtrack files |
 
 ### Conventions and patterns
 - **Data-driven tuning:** gameplay numbers live in tables and constants at the top of files (`WEAPONS`, `KNIFE`, `PERKS`, `ARMOUR_LEVELS`, `POINTS`, the RoundManager curves, and the prices in `MapData`/`Interactables`). Change numbers there, not inline.
@@ -67,8 +68,9 @@ Visuals, lighting and audio have **not** been checked in a real browser by an ag
 3. **Second pass:** purchasable doors that gate rooms and spawn windows, four perks (Tough Hide, Quick Hands, Rapid Fire, Second Wind), three armour levels, a two-tier weapon upgrade bench, the mystery box (with box-only LMG, Hand Cannon and Plasma Caster), power-ups (Full Ammo, Instakill, Double Points, Detonation), procedural SFX, and the saved best score.
 4. **Soundtrack:** split into 20 tracks, played shuffled, with a now-playing toast.
 5. **Docker:** multi-stage build to an nginx image (`nginx.conf` sets caching and gzip) and a compose file. **Knife** melee added.
+6. **Main menu:** real title menu (New Game, High Scores, Audio, Controls), pause menu (Resume, Audio, Controls, Quit), top-10 leaderboard, persisted volume sliders.
 
 Names (perks, power-ups, "Boarded Up") are deliberately original; keep it that way rather than copying names from existing games.
 
 ## Possible next steps (not started)
-Gamepad support · more maps / map selection · zombie variety (dogs/bosses) · a teddy-bear style box relocation · co-op · a settings menu (volume sliders, aim-assist toggle) · persistent stats · mobile/touch controls.
+Gamepad support · more maps / map selection · zombie variety (dogs/bosses) · a teddy-bear style box relocation · co-op · an aim-assist toggle in the menu · persistent stats · mobile/touch controls.

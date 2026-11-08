@@ -2,9 +2,33 @@ import { rand } from '../core/math';
 import type { WeaponId } from '../weapons/WeaponDefs';
 import { TRACKS, type Track } from './tracks';
 
+// Gains at 100% on the matching slider.
 const MASTER_VOLUME = 0.5;
-const MUSIC_VOLUME = 0.35;
+const MUSIC_VOLUME = 0.5;
+const SETTINGS_KEY = 'boarded-up-audio';
 const TRACKS_URL = `${import.meta.env.BASE_URL}audio/tracks/`;
+
+export type VolumeChannel = 'master' | 'music' | 'sfx';
+
+interface AudioSettings {
+  volume: Record<VolumeChannel, number>;
+  muted: boolean;
+}
+
+function loadSettings(): AudioSettings {
+  const settings: AudioSettings = { volume: { master: 1, music: 0.7, sfx: 1 }, muted: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<AudioSettings>;
+    for (const ch of Object.keys(settings.volume) as VolumeChannel[]) {
+      const v = saved.volume?.[ch];
+      if (typeof v === 'number') settings.volume[ch] = Math.min(1, Math.max(0, v));
+    }
+    settings.muted = saved.muted === true;
+  } catch {
+    // Storage unavailable or corrupt — use defaults.
+  }
+  return settings;
+}
 
 interface NoiseOpts {
   dur: number;
@@ -38,6 +62,8 @@ const SHOTS: Record<WeaponId, { noise: NoiseOpts; tone: ToneOpts }> = {
 class Sound {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
+  private sfx!: GainNode;
+  private musicGain: GainNode | null = null;
   private noiseBuf!: AudioBuffer;
   private music: HTMLAudioElement | null = null;
   /** Shuffled queue; every track plays once before any repeats. */
@@ -45,7 +71,7 @@ class Sound {
   private lastTrack: Track | null = null;
   /** Called whenever a new track starts (for the "now playing" toast). */
   onTrackChange: ((t: Track) => void) | null = null;
-  muted = false;
+  private settings = loadSettings();
 
   unlock(): void {
     if (this.ctx) {
@@ -56,16 +82,49 @@ class Sound {
     const ctx = new AudioContext();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : MASTER_VOLUME;
     this.master.connect(ctx.destination);
+    this.sfx = ctx.createGain();
+    this.sfx.connect(this.master);
+    this.applyGains();
     this.noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const data = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
   }
 
+  get muted(): boolean {
+    return this.settings.muted;
+  }
+
+  volume(ch: VolumeChannel): number {
+    return this.settings.volume[ch];
+  }
+
   toggleMute(): void {
-    this.muted = !this.muted;
-    if (this.ctx) this.master.gain.value = this.muted ? 0 : MASTER_VOLUME;
+    this.settings.muted = !this.settings.muted;
+    this.applyGains();
+    this.saveSettings();
+  }
+
+  setVolume(ch: VolumeChannel, v: number): void {
+    this.settings.volume[ch] = Math.min(1, Math.max(0, v));
+    this.applyGains();
+    this.saveSettings();
+  }
+
+  private applyGains(): void {
+    if (!this.ctx) return;
+    const s = this.settings;
+    this.master.gain.value = s.muted ? 0 : MASTER_VOLUME * s.volume.master;
+    this.sfx.gain.value = s.volume.sfx;
+    if (this.musicGain) this.musicGain.gain.value = MUSIC_VOLUME * s.volume.music;
+  }
+
+  private saveSettings(): void {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    } catch {
+      // Ignore.
+    }
   }
 
   /** Start the shuffled soundtrack (no-op until audio is unlocked, or if already started). */
@@ -75,11 +134,15 @@ class Sound {
     music.addEventListener('ended', () => this.nextTrack());
     // A missing or broken file just skips to the next track.
     music.addEventListener('error', () => setTimeout(() => this.nextTrack(), 1000));
-    const gain = this.ctx.createGain();
-    gain.gain.value = MUSIC_VOLUME;
+    this.musicGain = this.ctx.createGain();
     // Route through the master gain so mute applies to music too.
-    this.ctx.createMediaElementSource(music).connect(gain).connect(this.master);
+    this.ctx.createMediaElementSource(music).connect(this.musicGain).connect(this.master);
     this.music = music;
+    this.applyGains();
+    this.nextTrack();
+  }
+
+  skipTrack(): void {
     this.nextTrack();
   }
 
@@ -118,7 +181,7 @@ class Sound {
     const g = c.createGain();
     g.gain.setValueAtTime(o.gain * vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + o.dur);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(this.sfx);
     src.start(t, rand(0, 0.5));
     src.stop(t + o.dur + 0.05);
   }
@@ -135,9 +198,18 @@ class Sound {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(o.gain * vol, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.001, t + o.dur);
-    osc.connect(g).connect(this.master);
+    osc.connect(g).connect(this.sfx);
     osc.start(t);
     osc.stop(t + o.dur + 0.05);
+  }
+
+  menuMove(): void {
+    this.tone({ freq: 520, dur: 0.05, gain: 0.08, type: 'triangle' });
+  }
+
+  menuSelect(): void {
+    this.tone({ freq: 330, to: 660, dur: 0.12, gain: 0.15, type: 'square' });
+    this.noise({ dur: 0.06, freq: 900, gain: 0.15 });
   }
 
   shot(id: WeaponId): void {
@@ -187,7 +259,7 @@ class Sound {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.18 * vol, t + 0.15);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    osc.connect(f).connect(g).connect(this.master);
+    osc.connect(f).connect(g).connect(this.sfx);
     osc.start(t);
     lfo.start(t);
     osc.stop(t + dur + 0.05);
