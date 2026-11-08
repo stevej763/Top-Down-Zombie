@@ -8,6 +8,12 @@ public final class Zombie extends Body {
 
     public static final double RADIUS = 13;
     private static final double BREACH_RANGE = 26;
+    /**
+     * How near the standing spot a zombie must be to start climbing. Two zombies shoulder to shoulder
+     * are pushed to a radius either side of it, so this has to exceed RADIUS or they deadlock; it stays
+     * under the window's half-width (scaled to the climb path) so the climb doesn't clip the wall.
+     */
+    private static final double CLIMB_RANGE = 20;
     private static final double ATTACK_WINDUP = 0.45;
     private static final double ATTACK_COOLDOWN = 0.8;
     /** Close enough with a clear line to walk straight at a player instead of following the flow field. */
@@ -75,7 +81,7 @@ public final class Zombie extends Body {
                         game.tearPlank(b);
                         tearTimer = tearInterval;
                     }
-                } else if (b.climber == null && d < 10) {
+                } else if (b.climber == null && d < CLIMB_RANGE) {
                     b.climber = this;
                     state = State.CLIMBING;
                     climbT = 0;
