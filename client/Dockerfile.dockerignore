@@ -1,0 +1,7 @@
+*
+!client
+!shared
+client/node_modules
+client/dist
+# The unsplit source soundtrack isn't used by the game.
+client/public/audio/sound-track.mp3

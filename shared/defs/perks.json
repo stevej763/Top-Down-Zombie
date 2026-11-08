@@ -1,0 +1,15 @@
+{
+  "perks": {
+    "toughHide": { "name": "Tough Hide", "cost": 2500, "desc": "Max health 250" },
+    "quickHands": { "name": "Quick Hands", "cost": 3000, "desc": "Reload twice as fast" },
+    "rapidFire": { "name": "Rapid Fire", "cost": 2000, "desc": "Fire 33% faster" },
+    "secondWind": { "name": "Second Wind", "cost": 1500, "desc": "Get back up once (lose all perks)" }
+  },
+  "order": ["toughHide", "quickHands", "rapidFire", "secondWind"],
+  "effects": {
+    "toughHideMaxHp": 250,
+    "quickHandsReloadMult": 0.5,
+    "rapidFireIntervalMult": 0.75,
+    "secondWindInvuln": 3
+  }
+}

@@ -1,5 +1,6 @@
 package com.boardedup.map;
 
+import com.boardedup.sim.map.MapDoc;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;

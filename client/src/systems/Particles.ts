@@ -1,6 +1,5 @@
 import { rand, TAU } from '../core/math';
-import type { Halo } from '../weapons/Weapon';
-import type { CasingKind, WeaponFx } from '../weapons/WeaponDefs';
+import type { CasingKind, Halo, WeaponFx } from '../render/visuals';
 
 /** Casings and bullet holes fade out instead of staining the floor forever. */
 const DECAL_LIFE = 18;

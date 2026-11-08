@@ -1,45 +1,63 @@
 import { sound } from '../audio/Sound';
-import { Player } from '../entities/Player';
-import { Zombie } from '../entities/Zombie';
-import { drawCrosshair, drawPlayer, drawWindow, drawZombie, renderMap } from '../render/draw';
+import { loadIdentity, type MapSummary } from '../net/api';
+import type { Link } from '../net/Connection';
+import { NetGame } from '../net/NetGame';
+import type { GameResult, LobbyPlayer, NetEvent, ServerMessage } from '../net/protocol';
+import {
+  drawCrosshair, drawInteractable, drawInteractableOverlay, drawPlayer, drawPlayerOverlay, drawPowerUps, drawWindow,
+  drawZombie, renderMap,
+} from '../render/draw';
 import { Lighting } from '../render/lighting';
-import { fetchMap, type MapSummary } from '../net/api';
-import { aimAssist } from '../systems/aimAssist';
-import { ARMOUR_ABSORB } from '../systems/Armour';
-import { Economy, POINTS } from '../systems/Economy';
+import {
+  PERK_VISUALS, POWERUP_VISUALS, TIER_HALO, WEAPON_FX, type PlayerFx, type ZombieFx,
+} from '../render/visuals';
+import { KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../game/defs';
+import { NO_INPUT, type PlayerInput } from '../game/input';
+import type { MapDoc } from '../game/MapData';
 import { Leaderboard } from '../systems/HighScore';
 import { Particles } from '../systems/Particles';
-import { FlowField } from '../systems/Pathfinding';
-import { POWERUP_DURATION, POWERUPS, PowerUps, type PowerUpId } from '../systems/PowerUps';
-import { RoundManager } from '../systems/RoundManager';
 import { drawHUD } from '../ui/HUD';
 import { Menu } from '../ui/Menu';
 import { drawGameOver } from '../ui/Screens';
-import type { Weapon } from '../weapons/Weapon';
-import { KNIFE, WEAPONS } from '../weapons/WeaponDefs';
-import { Barricade } from '../world/Barricade';
-import {
-  ArmourBench, Door, Interactable, MysteryBox, PerkMachine, UpgradeBench, WallBuy,
-} from '../world/Interactables';
-import { parseMap, type MapDoc, type RoomId } from '../world/MapData';
-import { Tile, TileMap } from '../world/TileMap';
+import { buildLevel, restingWorld, type Level } from '../view/Level';
+import { heldWeapon, type PlayerView, type WorldView } from '../view/WorldView';
 import { Camera } from './Camera';
 import { Input } from './Input';
-import { angleDiff, dist, rand, rayCircle } from './math';
+import { dist, rand, TAU } from './math';
 
 export const VIEW_W = 960;
 export const VIEW_H = 600;
 const STEP = 1 / 60;
 const HEARING_RANGE = 700;
-const SECOND_WIND_INVULN = 3;
+const BANNER_TIME = 3;
+const FEED_TIME = 4;
+const WHITE = '#ffffff';
+const DOWN_RED = '#e05040';
+/** Events this many ticks older than the newest in a batch (after a hidden tab, say) play no effects. */
+const STALE_EVENT_TICKS = 30;
+/** After a reconnect, the server says `welcome` if our seat is still there; past this, it's gone. */
+const RESUME_TIMEOUT = 3;
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover';
 
-export type Interaction =
-  | { kind: 'rebuild'; barricade: Barricade }
-  | { kind: 'use'; target: Interactable }
-  | null;
+/** The room we're in, from the server's `welcome`. */
+export interface RoomInfo {
+  code: string;
+  mapId: string;
+  solo: boolean;
+  doc: MapDoc;
+}
 
+export type LobbyInfo = Extract<ServerMessage, { type: 'lobby' }>;
+export type GameOverInfo = Extract<ServerMessage, { type: 'gameOver' }>;
+
+/**
+ * The browser client: owns the canvas, input, camera, particles, audio, menus and HUD. The
+ * game itself runs on the server: this joins a room over `link`, sends one `PlayerInput` per
+ * tick, and draws `world`, which `NetGame` builds from snapshots (interpolated, with the local
+ * player predicted). Server events become sound and effects. Rendering, the HUD and prompts
+ * read only `world` and `level`.
+ */
 export class Game {
   state: GameState = 'menu';
   readonly input: Input;
@@ -47,28 +65,42 @@ export class Game {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly lighting = new Lighting(VIEW_W, VIEW_H);
 
-  map!: TileMap;
+  /** The static map: tiles, window and fixture positions. */
+  level!: Level;
+  /** What's drawn. */
+  world!: WorldView;
+  /** The local player's id in `world.players` (the server's id once in a room). */
+  you = 0;
+  /** The map New Game creates a room on. */
+  mapId: string;
+  room: RoomInfo | null = null;
+  lobby: LobbyInfo | null = null;
+  /** The finished game, for the game-over screen. */
+  result: GameOverInfo | null = null;
+  private net: NetGame | null = null;
+  /** What the last create/join asked for; set means a room may exist on the server even before `welcome`. */
+  private asked: 'solo' | 'coop' | 'join' | null = null;
+  /** `link.opens` when the room last welcomed us; a higher count means we reconnected. */
+  private roomOpens = 0;
+  private resumeBy = 0;
+  /** Solo "play again" was sent; ignore more presses until the server starts it. */
+  private restarting = false;
+
   private mapCanvas!: HTMLCanvasElement;
-  barricades: Barricade[] = [];
-  interactables: Interactable[] = [];
-  openRooms = new Set<RoomId>();
-  player!: Player;
-  zombies: Zombie[] = [];
-  rounds!: RoundManager;
-  flow!: FlowField;
-  economy!: Economy;
-  powerUps!: PowerUps;
   particles!: Particles;
   camera!: Camera;
+  private playerFx = new Map<number, PlayerFx>();
+  private zombieFx = new Map<number, ZombieFx>();
 
-  interaction: Interaction = null;
-  mouseWorld = { x: 0, y: 0 };
-  kills = 0;
   time = 0;
   gameOverTimer = 0;
   readonly scores: Leaderboard;
-  /** Big centre-screen callout (power-ups, Second Wind). */
-  callout = { text: '', color: '#fff', timer: 0 };
+  /** Big centre-screen callout (power-ups, Second Wind, going down). */
+  callout = { text: '', color: WHITE, timer: 0 };
+  /** Round start/end banner. */
+  banner = { text: '', timer: 0 };
+  /** Small lines about teammates ("Sam is down!"), newest last. */
+  feed: { text: string; color: string; timer: number }[] = [];
   /** "Now playing" toast. */
   nowPlaying = { title: '', timer: 0 };
   /** White flash overlay (nuke). */
@@ -78,8 +110,9 @@ export class Game {
   private last = 0;
   private acc = 0;
 
-  /** `maps` is the server's map list; `mapDoc` is the map New Game plays (changed by `loadMap`). */
-  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], public mapDoc: MapDoc) {
+  /** `maps` is the server's map list; `mapDoc` is drawn behind the title menu. */
+  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], private mapDoc: MapDoc, readonly link: Link) {
+    this.mapId = mapDoc.id;
     this.scores = new Leaderboard(mapDoc.id);
     this.ctx = canvas.getContext('2d')!;
     this.input = new Input(canvas, VIEW_W, VIEW_H);
@@ -92,60 +125,118 @@ export class Game {
     void this.scores.refresh();
   }
 
-  /** Fetch a map and make it the one New Game plays. */
-  async loadMap(id: string): Promise<void> {
-    if (id !== this.mapDoc.id) this.mapDoc = await fetchMap(id);
+  // ---------------------------------------------------------------- rooms
+
+  /** The map New Game plays. */
+  selectMap(id: string): void {
+    this.mapId = id;
     this.scores.show(id);
   }
 
-  newGame(): void {
-    const data = parseMap(this.mapDoc);
-    this.map = data.map;
-    this.mapCanvas = renderMap(this.map);
-    this.barricades = data.windows.map((w) => new Barricade(w));
-    this.interactables = [
-      ...data.wallBuys.map((wb) => new WallBuy(wb, WEAPONS[wb.weapon])),
-      ...data.perks.map((p) => new PerkMachine(p, p.perk)),
-      new ArmourBench(data.armour),
-      new UpgradeBench(data.upgrade),
-      new MysteryBox(data.box.tx, data.box.ty),
-      ...data.doors.map((d) => new Door(d)),
-    ];
-    this.openRooms = new Set([data.startRoom]);
-    this.player = new Player(data.playerStart.x, data.playerStart.y);
-    this.zombies = [];
-    this.rounds = new RoundManager();
-    this.flow = new FlowField(this.map, (t) => t === Tile.Floor);
-    this.economy = new Economy();
-    this.powerUps = new PowerUps();
-    this.particles = new Particles(this.map.pxW, this.map.pxH);
-    this.camera = new Camera(VIEW_W, VIEW_H, this.map.pxW, this.map.pxH);
-    this.camera.snap(this.player.x, this.player.y);
-    this.interaction = null;
-    this.kills = 0;
-    this.gameOverTimer = 0;
-    this.scores.lastRank = -1;
-    this.callout.timer = 0;
-    this.screenFlash = 0;
-    this.state = 'playing';
+  createRoom(solo: boolean): void {
+    this.asked = solo ? 'solo' : 'coop';
+    this.link.connect();
+    this.link.send({ type: 'create', mapId: this.mapId, solo });
   }
 
-  /** Back to the title menu, with a fresh (frozen) world behind it. */
-  toMenu(): void {
-    const lastRank = this.scores.lastRank;
-    this.newGame();
-    this.scores.lastRank = lastRank;
+  joinRoom(code: string): void {
+    this.asked = 'join';
+    this.link.connect();
+    this.link.send({ type: 'join', code });
+  }
+
+  setReady(ready: boolean): void {
+    this.link.send({ type: 'ready', ready });
+  }
+
+  startGame(): void {
+    this.link.send({ type: 'start' });
+  }
+
+  get isHost(): boolean {
+    return this.lobby?.ownerId === this.you;
+  }
+
+  get lobbyMe(): LobbyPlayer | undefined {
+    return this.lobby?.players.find((p) => p.id === this.you);
+  }
+
+  /** Leave the room (if any) and drop the socket. */
+  leaveRoom(): void {
+    if (this.room || this.asked) this.link.send({ type: 'leave' });
+    this.link.close();
+    this.room = null;
+    this.lobby = null;
+    this.net = null;
+    this.asked = null;
+    this.resumeBy = 0;
+  }
+
+  /** Back to the title menu, out of any room, with the default map resting behind it. */
+  toMenu(notice = ''): void {
+    this.leaveRoom();
+    this.you = 0;
+    this.setLevel(buildLevel(this.mapDoc));
     this.state = 'menu';
     this.menu.open('title');
+    if (notice) this.menu.fail(notice);
+  }
+
+  private setLevel(level: Level): void {
+    this.level = level;
+    const map = level.data.map;
+    this.world = restingWorld(level, this.you, loadIdentity()?.name ?? '');
+    this.mapCanvas = renderMap(map);
+    this.particles = new Particles(map.pxW, map.pxH);
+    this.camera = new Camera(VIEW_W, VIEW_H, map.pxW, map.pxH);
+    this.camera.snap(this.me.x, this.me.y);
+    this.playerFx.clear();
+    this.zombieFx.clear();
+    this.callout.timer = 0;
+    this.banner.timer = 0;
+    this.feed = [];
+    this.screenFlash = 0;
+  }
+
+  /** The local player. */
+  get me(): PlayerView {
+    return this.world.players.find((p) => p.id === this.you) ?? this.world.players[0];
+  }
+
+  /** Who the camera follows while you're dead: the first teammate still up, if any. */
+  get spectating(): PlayerView | null {
+    if (this.me.state !== 'dead') return null;
+    return this.world.players.find((p) => p.state === 'alive' && p.id !== this.you) ?? null;
+  }
+
+  /** Where the camera and your ears are. */
+  private get focus(): PlayerView {
+    return this.spectating ?? this.me;
+  }
+
+  playerFxOf(id: number): PlayerFx {
+    let fx = this.playerFx.get(id);
+    if (!fx) {
+      fx = { flash: 0, hurtFlash: 0, knifeSwing: 0 };
+      this.playerFx.set(id, fx);
+    }
+    return fx;
   }
 
   pause(): void {
     this.state = 'paused';
     this.menu.open('pause');
+    this.sendPause();
   }
 
   resume(): void {
     this.state = 'playing';
+    this.sendPause();
+  }
+
+  /** Solo games stop on the server while paused; co-op plays on, so there's nothing to send. */
+  private sendPause(): void {
+    if (this.room?.solo && this.link.status === 'open') this.link.send({ type: 'pause', paused: this.state === 'paused' });
   }
 
   start(): void {
@@ -168,27 +259,154 @@ export class Game {
     requestAnimationFrame(this.frame);
   };
 
+  // ---------------------------------------------------------------- network
+
+  /** Handle everything the server sent since the last tick. */
+  private pollNet(): void {
+    const msgs = this.link.drain();
+    let newest = -Infinity;
+    for (const m of msgs) if (m.type === 'events') newest = Math.max(newest, m.tick);
+    for (const m of msgs) this.handle(m, m.type !== 'events' || m.tick >= newest - STALE_EVENT_TICKS);
+
+    if (this.room && this.link.status === 'open' && this.link.opens > this.roomOpens && this.resumeBy === 0) {
+      this.resumeBy = this.time + RESUME_TIMEOUT;
+    }
+    if (this.resumeBy > 0 && this.time > this.resumeBy) this.toMenu('Lost the connection to the game');
+  }
+
+  /** `fresh` is false for events too old to be worth playing. */
+  private handle(m: ServerMessage, fresh: boolean): void {
+    switch (m.type) {
+      case 'welcome':
+        this.welcome(m);
+        break;
+      case 'lobby':
+        this.lobby = m;
+        // Back in the lobby without a gameOver: the game crashed, or ended while we were away.
+        if (m.state === 'lobby' && (this.state === 'playing' || this.state === 'paused')) {
+          if (this.room?.solo) this.toMenu('The game ended');
+          else this.toLobby();
+        }
+        break;
+      case 'start':
+        this.gameStarted(m.tick, m.seq);
+        break;
+      case 'snapshot':
+        if (this.state === 'playing' || this.state === 'paused') this.net?.snapshot(m, this.time);
+        break;
+      case 'events':
+        if (fresh && (this.state === 'playing' || this.state === 'paused')) for (const e of m.events) this.onEvent(e);
+        break;
+      case 'gameOver':
+        this.gameOver(m);
+        break;
+      case 'error':
+        this.restarting = false;
+        if (this.state === 'menu') this.menu.fail(m.message);
+        else this.addFeed(m.message, DOWN_RED);
+        // A create or join that failed leaves us in no room.
+        if (!this.room) this.asked = null;
+        break;
+      case 'pong':
+        break;
+    }
+  }
+
+  private welcome(m: Extract<ServerMessage, { type: 'welcome' }>): void {
+    this.roomOpens = this.link.opens;
+    this.resumeBy = 0;
+    this.you = m.you.playerId;
+    // The same room again: a reconnect. The server follows with `start` if the game is still on.
+    if (this.room?.code === m.room.code) return;
+    this.room = { code: m.room.code, mapId: m.room.mapId, solo: m.room.solo, doc: m.map };
+    this.lobby = null;
+    this.setLevel(buildLevel(m.map));
+    this.scores.show(m.room.mapId);
+    this.menu.done();
+    if (!this.room.solo) this.toLobby();
+  }
+
+  private toLobby(): void {
+    this.state = 'menu';
+    this.menu.open('title');
+    this.menu.showLobby();
+  }
+
+  private gameStarted(tick: number, seq: number): void {
+    const room = this.room;
+    if (!room) return;
+    const running = this.state === 'playing' || this.state === 'paused';
+    if (running && this.net && tick > 0) {
+      this.net.resume(seq);
+      // The server may have kept (or lost) a solo pause across the reconnect; tell it which.
+      this.sendPause();
+      return;
+    }
+    // A fresh level each game: the last one's doors were opened in its tile map.
+    this.setLevel(buildLevel(room.doc));
+    this.net = new NetGame(this.level, this.you, seq);
+    this.restarting = false;
+    this.result = null;
+    this.gameOverTimer = 0;
+    this.state = 'playing';
+    this.menu.done();
+    // Resuming a game after a reload: the server may still be holding it paused.
+    if (tick > 0) this.sendPause();
+  }
+
+  private gameOver(m: GameOverInfo): void {
+    this.state = 'gameover';
+    this.gameOverTimer = 0;
+    this.result = m;
+    sound.gameOver();
+    const mine = m.players.find((p) => p.id === this.you);
+    if (this.room) this.scores.show(this.room.mapId);
+    this.scores.lastRank = mine?.rank ?? -1;
+  }
+
+  /** Solo: a new game in the same room. Co-op: back to the lobby to ready up again. */
+  private playAgain(): void {
+    if (!this.room) {
+      this.toMenu();
+    } else if (this.room.solo) {
+      if (!this.restarting) this.startGame();
+      this.restarting = true;
+    } else {
+      this.toLobby();
+    }
+  }
+
+  get myResult(): GameResult | undefined {
+    return this.result?.players.find((p) => p.id === this.you);
+  }
+
   // ---------------------------------------------------------------- update
 
-  private update(dt: number): void {
+  /** @internal Public for the headless smoke run; the frame loop calls it. */
+  update(dt: number): void {
     this.time += dt;
     const inp = this.input;
     if (inp.wasPressed('KeyM')) sound.toggleMute();
     sound.startMusic();
     // Keep the music audible on the audio page so the slider can be judged.
     sound.setMusicPaused(this.state === 'paused' && this.menu.page !== 'audio');
+    this.pollNet();
     switch (this.state) {
       case 'menu':
+        this.menu.update(this);
+        break;
       case 'paused':
-        if (this.state === 'paused' && inp.wasPressed('KeyP')) this.resume();
+        // Co-op keeps going behind the pause menu; you just stand still. Solo is stopped on the server.
+        if (!this.room?.solo) this.runNet(dt, { ...NO_INPUT, aim: this.me.aim });
+        if (this.state !== 'paused') break;
+        if (inp.wasPressed('KeyP')) this.resume();
         else this.menu.update(this);
         break;
       case 'gameover':
         this.gameOverTimer += dt;
-        this.particles.update(dt);
-        this.camera.follow(this.player.x, this.player.y, dt);
+        this.updateEffects(dt);
         if (this.gameOverTimer > 1.5) {
-          if (inp.wasPressed('Enter') || inp.mousePressed) this.newGame();
+          if (inp.wasPressed('Enter') || inp.mousePressed) this.playAgain();
           else if (inp.wasPressed('Escape')) this.toMenu();
         }
         break;
@@ -197,352 +415,300 @@ export class Game {
           this.pause();
           break;
         }
-        this.updateWorld(dt);
+        this.runNet(dt, this.readInput());
         break;
     }
   }
 
-  private updateWorld(dt: number): void {
-    this.mouseWorld.x = this.input.mouse.x + this.camera.x;
-    this.mouseWorld.y = this.input.mouse.y + this.camera.y;
-    this.economy.multiplier = this.powerUps.double > 0 ? 2 : 1;
-
-    this.player.update(dt, this);
-    this.flow.update(this.player.x, this.player.y);
-    this.rounds.update(dt, this);
-    for (const it of this.interactables) it.update(dt, this);
-    for (const z of this.zombies) z.update(dt, this);
-    this.separate();
-    this.zombies = this.zombies.filter((z) => !z.dead);
-    this.powerUps.update(dt, this);
-    this.particles.update(dt);
-    this.camera.follow(this.player.x, this.player.y, dt);
-    this.callout.timer = Math.max(0, this.callout.timer - dt);
-    this.nowPlaying.timer = Math.max(0, this.nowPlaying.timer - dt);
-    this.screenFlash = Math.max(0, this.screenFlash - dt * 1.5);
+  /** Send this tick's input (predicting it locally), then rebuild the world to draw. */
+  private runNet(dt: number, input: PlayerInput): void {
+    const net = this.net;
+    if (!net) return;
+    // While the socket is down the server isn't hearing us, so don't predict moves it won't make.
+    if (this.link.status === 'open') this.link.send({ type: 'input', inputs: [net.tick(input, dt)] });
+    this.world = net.view(this.time) ?? this.world;
+    this.updateEffects(dt);
     this.updateGroans(dt);
   }
 
+  private readInput(): PlayerInput {
+    const inp = this.input;
+    const p = this.me;
+    const mx = inp.mouse.x + this.camera.x;
+    const my = inp.mouse.y + this.camera.y;
+    return {
+      moveX: (inp.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (inp.isDown('KeyA', 'ArrowLeft') ? 1 : 0),
+      moveY: (inp.isDown('KeyS', 'ArrowDown') ? 1 : 0) - (inp.isDown('KeyW', 'ArrowUp') ? 1 : 0),
+      aim: Math.atan2(my - p.y, mx - p.x),
+      fireHeld: inp.isDown('Space') || inp.mouseDown,
+      firePressed: inp.wasPressed('Space') || inp.mousePressed,
+      reload: inp.wasPressed('KeyR'),
+      knife: inp.wasPressed('KeyF', 'KeyV'),
+      interactHeld: inp.isDown('KeyE'),
+      interactPressed: inp.wasPressed('KeyE'),
+      selectSlot: inp.wasPressed('Digit1') ? 0 : inp.wasPressed('Digit2') ? 1 : -1,
+      swap: inp.wasPressed('KeyQ') || inp.wheel !== 0,
+    };
+  }
+
+  /** Cosmetic timers: particles, camera, flashes, banners. */
+  private updateEffects(dt: number): void {
+    for (const fx of this.playerFx.values()) {
+      fx.flash = Math.max(0, fx.flash - dt);
+      fx.hurtFlash = Math.max(0, fx.hurtFlash - dt * 2);
+      fx.knifeSwing = Math.max(0, fx.knifeSwing - dt);
+    }
+    for (const z of this.world.zombies) {
+      const zf = this.fxOf(z.id);
+      zf.hitFlash = Math.max(0, zf.hitFlash - dt);
+      zf.wobble += dt * (z.runner ? 14 : 6);
+    }
+    this.particles.update(dt);
+    const f = this.focus;
+    this.camera.follow(f.x, f.y, dt);
+    this.callout.timer = Math.max(0, this.callout.timer - dt);
+    this.banner.timer = Math.max(0, this.banner.timer - dt);
+    for (const line of this.feed) line.timer -= dt;
+    this.feed = this.feed.filter((l) => l.timer > 0);
+    this.nowPlaying.timer = Math.max(0, this.nowPlaying.timer - dt);
+    this.screenFlash = Math.max(0, this.screenFlash - dt * 1.5);
+  }
+
+  private fxOf(id: number): ZombieFx {
+    let fx = this.zombieFx.get(id);
+    if (!fx) {
+      // Spread the arm-swing phases so a crowd doesn't move in step.
+      fx = { hitFlash: 0, wobble: (id * 2.399) % TAU };
+      this.zombieFx.set(id, fx);
+    }
+    return fx;
+  }
+
   private updateGroans(dt: number): void {
+    const zs = this.world.zombies;
     this.groanTimer -= dt;
-    if (this.groanTimer > 0 || this.zombies.length === 0) return;
-    const z = this.zombies[Math.floor(rand(0, this.zombies.length))];
+    if (this.groanTimer > 0 || zs.length === 0) return;
+    const z = zs[Math.floor(rand(0, zs.length))];
     sound.groan(this.volumeAt(z.x, z.y));
-    this.groanTimer = rand(0.8, 3) / Math.min(3, 1 + this.zombies.length / 8);
+    this.groanTimer = rand(0.8, 3) / Math.min(3, 1 + zs.length / 8);
   }
 
-  /** 0..1 loudness for a sound at a world position, by distance from the player. */
-  volumeAt(x: number, y: number): number {
-    return Math.max(0, 1 - dist(x, y, this.player.x, this.player.y) / HEARING_RANGE);
+  /** 0..1 loudness for a sound at a world position, by distance from where you're watching. */
+  private volumeAt(x: number, y: number): number {
+    const p = this.focus;
+    return Math.max(0, 1 - dist(x, y, p.x, p.y) / HEARING_RANGE);
   }
 
-  /** Push overlapping zombies apart, and the player out of zombies. */
-  private separate(): void {
-    const zs = this.zombies;
-    const minD = Zombie.RADIUS * 2;
-    for (let i = 0; i < zs.length; i++) {
-      const a = zs[i];
-      if (a.state === 'climbing') continue;
-      for (let j = i + 1; j < zs.length; j++) {
-        const b = zs[j];
-        if (b.state === 'climbing' || (a.state === 'inside') !== (b.state === 'inside')) continue;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= minD * minD || d2 === 0) continue;
-        const d = Math.sqrt(d2);
-        const push = (minD - d) / 2 / d;
-        a.x -= dx * push;
-        a.y -= dy * push;
-        b.x += dx * push;
-        b.y += dy * push;
-      }
-    }
-
-    const p = this.player;
-    const minPD = Zombie.RADIUS + Player.RADIUS;
-    for (const z of zs) {
-      if (z.state !== 'inside') continue;
-      const dx = p.x - z.x;
-      const dy = p.y - z.y;
-      const d = Math.hypot(dx, dy);
-      if (d >= minPD || d === 0) continue;
-      const overlap = minPD - d;
-      p.x += (dx / d) * overlap * 0.7;
-      p.y += (dy / d) * overlap * 0.7;
-      z.x -= (dx / d) * overlap * 0.3;
-      z.y -= (dy / d) * overlap * 0.3;
-    }
-
-    this.map.collideCircle(p, Player.RADIUS, (t) => t !== Tile.Floor);
-    for (const z of zs) {
-      if (z.state !== 'climbing') this.map.collideCircle(z, Zombie.RADIUS, z.solid);
-    }
+  private playerById(id: number): PlayerView | undefined {
+    return this.world.players.find((p) => p.id === id);
   }
 
-  // --------------------------------------------------------------- actions
-
-  fire(w: Weapon): void {
-    const p = this.player;
-    const def = w.def;
-    w.mag--;
-    w.cooldown = def.fireInterval * p.fireIntervalMult;
-
-    const base = aimAssist(this, p.x, p.y, p.aim, def.range);
-    const muzzleDist = Player.RADIUS + def.barrel + 6;
-    const mx = p.x + Math.cos(p.aim) * muzzleDist;
-    const my = p.y + Math.sin(p.aim) * muzzleDist;
-    for (let i = 0; i < def.pellets; i++) {
-      this.traceShot(p.x, p.y, mx, my, base + rand(-def.spread / 2, def.spread / 2), w);
-    }
-    if (def.fx.casing) this.particles.casing(p.x + Math.cos(p.aim) * 12, p.y + Math.sin(p.aim) * 12, p.aim, def.fx.casing);
-    p.flash = 0.05;
-    this.camera.addShake(def.shake);
-    sound.shot(def.id);
+  private nameOf(id: number): string {
+    return this.playerById(id)?.name ?? this.lobby?.players.find((p) => p.id === id)?.name ?? 'Someone';
   }
 
-  /** Hitscan from the player's centre; the tracer is drawn from the muzzle. */
-  private traceShot(ox: number, oy: number, mx: number, my: number, angle: number, w: Weapon): void {
-    const def = w.def;
-    const dx = Math.cos(angle);
-    const dy = Math.sin(angle);
-    const wallD = this.map.rayWall(ox, oy, dx, dy, def.range);
-
-    const hits: { z: Zombie; t: number }[] = [];
-    for (const z of this.zombies) {
-      if (z.dead) continue;
-      const t = rayCircle(ox, oy, dx, dy, z.x, z.y, Zombie.RADIUS);
-      if (t >= 0 && t <= wallD) hits.push({ z, t });
-    }
-    hits.sort((a, b) => a.t - b.t);
-
-    let end = wallD;
-    let pens = def.penetration;
-    for (const h of hits) {
-      // Headshot: the ray passes close to the centre line and the zombie is facing the shooter.
-      const offset = Math.abs((h.z.x - ox) * dy - (h.z.y - oy) * dx);
-      const facingShooter = Math.abs(angleDiff(h.z.facing, Math.atan2(oy - h.z.y, ox - h.z.x))) < 1.2;
-      const head = offset < Zombie.RADIUS * 0.35 && facingShooter;
-      this.hitZombie(h.z, w.damage, ox + dx * h.t, oy + dy * h.t, angle, head);
-      if (--pens <= 0) {
-        end = h.t;
-        break;
-      }
-    }
-
-    const ex = ox + dx * end;
-    const ey = oy + dy * end;
-    this.particles.tracer(mx, my, ex, ey, def.fx, w.halo);
-    if (def.splash) {
-      this.explode(ex, ey, def.splash.radius, def.splash.damage * (w.damage / def.damage));
-    } else if (end === wallD && wallD < def.range) {
-      // Back the mark off the wall face so it sits on the visible side.
-      this.particles.impact(ex - dx * 1.5, ey - dy * 1.5, angle + Math.PI, def.fx.tracer);
-    }
+  /** Loudness of a sound made by a player: full for your own, by distance for teammates'. */
+  private volumeOf(id: number): number {
+    if (id === this.you) return 1;
+    const p = this.playerById(id);
+    return p ? this.volumeAt(p.x, p.y) : 0;
   }
 
-  /** Slash the closest zombie inside the knife arc. */
-  knife(): void {
-    const p = this.player;
-    const reach = Player.RADIUS + KNIFE.reach + Zombie.RADIUS;
-    let target: Zombie | null = null;
-    let bestD = Infinity;
-    for (const z of this.zombies) {
-      if (z.dead || z.state === 'climbing') continue;
-      const d = dist(p.x, p.y, z.x, z.y);
-      if (d > reach || d >= bestD) continue;
-      if (Math.abs(angleDiff(p.aim, Math.atan2(z.y - p.y, z.x - p.x))) > KNIFE.arc / 2) continue;
-      if (!this.map.hasLOS(p.x, p.y, z.x, z.y)) continue;
-      target = z;
-      bestD = d;
-    }
-    sound.knife(target !== null);
-    if (!target) return;
-    const angle = Math.atan2(target.y - p.y, target.x - p.x);
-    this.hitZombie(target, KNIFE.damage, target.x, target.y, angle, false, POINTS.knifeKill);
-    if (!target.dead && target.state === 'inside') {
-      target.x += Math.cos(angle) * 8;
-      target.y += Math.sin(angle) * 8;
-    }
-    this.camera.addShake(2);
-  }
-
-  private explode(x: number, y: number, radius: number, damage: number): void {
-    for (const z of this.zombies) {
-      if (z.dead) continue;
-      const d = dist(x, y, z.x, z.y);
-      if (d < radius + Zombie.RADIUS) {
-        this.hitZombie(z, damage * (1 - 0.5 * Math.min(1, d / radius)), z.x, z.y, Math.atan2(z.y - y, z.x - x), false);
-      }
-    }
-    this.particles.explosion(x, y, '#8ad8ff');
-    this.particles.ring(x, y, radius, '120, 220, 255');
-    this.camera.addShake(3);
-    sound.explosion(0.4);
-  }
-
-  private hitZombie(
-    z: Zombie, damage: number, hx: number, hy: number, angle: number, head: boolean,
-    killPoints: number = head ? POINTS.headshotKill : POINTS.kill,
-  ): void {
-    if (z.dead) return;
-    z.hp -= this.powerUps.instakill > 0 ? z.hp : head ? damage * 1.5 : damage;
-    z.hitFlash = 0.08;
-    this.particles.blood(hx, hy, angle, 6);
-    if (z.state === 'inside') {
-      z.x += Math.cos(angle) * 2;
-      z.y += Math.sin(angle) * 2;
-    }
-
-    if (z.hp <= 0) {
-      this.killZombie(z, killPoints);
-    } else {
-      const pts = this.economy.award(POINTS.hit);
-      this.particles.text(`+${pts}`, z.x, z.y - 16);
-      sound.hit();
-    }
-  }
-
-  private killZombie(z: Zombie, points: number): void {
-    z.dead = true;
-    if (z.window.climber === z) z.window.climber = null;
-    this.kills++;
-    if (points > 0) {
-      const pts = this.economy.award(points);
-      this.particles.text(`+${pts}`, z.x, z.y - 16);
-    }
-    this.particles.bloodPool(z.x, z.y);
-    sound.zombieDeath(this.volumeAt(z.x, z.y));
-    // Only drop power-ups where the player can reach them.
-    if (z.state === 'inside') this.powerUps.maybeDrop(z.x, z.y);
-  }
-
-  applyPowerUp(id: PowerUpId): void {
-    const def = POWERUPS[id];
-    switch (id) {
-      case 'ammo':
-        for (const w of this.player.weapons) w?.refill();
-        break;
-      case 'instakill':
-        this.powerUps.instakill = POWERUP_DURATION;
-        break;
-      case 'double':
-        this.powerUps.double = POWERUP_DURATION;
-        break;
-      case 'nuke':
-        for (const z of this.zombies) if (!z.dead) this.killZombie(z, 0);
-        this.economy.award(POINTS.nuke);
-        this.screenFlash = 1;
-        this.camera.addShake(14);
-        sound.explosion();
-        break;
-    }
-    this.showCallout(def.name.toUpperCase(), def.color);
-    sound.powerUp();
-  }
-
-  showCallout(text: string, color: string): void {
+  private showCallout(text: string, color: string): void {
     this.callout = { text, color, timer: 2 };
   }
 
-  damagePlayer(amount: number): void {
-    const p = this.player;
-    if (p.invuln > 0) return;
-    if (p.armour > 0) {
-      const absorbed = Math.min(p.armour, amount * ARMOUR_ABSORB);
-      p.armour -= absorbed;
-      amount -= absorbed;
-    }
-    p.hp -= amount;
-    p.sinceHit = 0;
-    p.hurtFlash = 1;
-    this.camera.addShake(7);
-    this.particles.blood(p.x, p.y, rand(0, Math.PI * 2), 8);
-    sound.hurt();
-    if (p.hp > 0) return;
-
-    if (p.perks.has('secondWind')) {
-      this.secondWind();
-    } else {
-      p.hp = 0;
-      this.gameOver();
-    }
+  private showBanner(text: string): void {
+    this.banner = { text, timer: BANNER_TIME };
   }
 
-  /** Get back up: lose every perk, full health, brief invulnerability, zombies shoved back. */
-  private secondWind(): void {
-    const p = this.player;
-    p.perks.clear();
-    p.hp = p.maxHp;
-    p.invuln = SECOND_WIND_INVULN;
-    for (const z of this.zombies) {
-      if (z.state !== 'inside') continue;
-      const d = dist(p.x, p.y, z.x, z.y);
-      if (d < 140 && d > 0) {
-        z.x += ((z.x - p.x) / d) * 60;
-        z.y += ((z.y - p.y) / d) * 60;
-        this.map.collideCircle(z, Zombie.RADIUS, z.solid);
+  private addFeed(text: string, color = WHITE): void {
+    this.feed.push({ text, color, timer: FEED_TIME });
+    if (this.feed.length > 4) this.feed.shift();
+  }
+
+  /** Floating text above the player. */
+  private playerText(text: string, color: string): void {
+    const p = this.me;
+    this.particles.text(text, p.x, p.y - 20, color);
+  }
+
+  /** Purchases, points and screen shake are only shown to whoever they belong to. */
+  private onEvent(e: NetEvent): void {
+    const mine = 'player' in e && e.player === this.you;
+    const pts = (points: number, x: number, y: number) => {
+      if (mine && points > 0) this.particles.text(`+${points}`, x, y);
+    };
+    switch (e.type) {
+      case 'shot': {
+        const wfx = WEAPON_FX[e.weapon];
+        if (wfx.casing) this.particles.casing(e.x + Math.cos(e.aim) * 12, e.y + Math.sin(e.aim) * 12, e.aim, wfx.casing);
+        this.playerFxOf(e.player).flash = 0.05;
+        if (mine) this.camera.addShake(wfx.shake);
+        sound.shot(e.weapon, mine ? 1 : this.volumeAt(e.x, e.y));
+        break;
       }
+      case 'tracer': {
+        // The sim traces from the shooter's centre; draw from the muzzle.
+        const wfx = WEAPON_FX[e.weapon];
+        const len = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+        const dx = len > 0 ? (e.x2 - e.x1) / len : 0;
+        const dy = len > 0 ? (e.y2 - e.y1) / len : 0;
+        const m = Math.min(len, PLAYER_RADIUS + wfx.barrel + 6);
+        this.particles.tracer(e.x1 + dx * m, e.y1 + dy * m, e.x2, e.y2, wfx, TIER_HALO[e.tier]);
+        // Back the mark off the wall face so it sits on the visible side.
+        if (e.hitWall) this.particles.impact(e.x2 - dx * 1.5, e.y2 - dy * 1.5, Math.atan2(dy, dx) + Math.PI, wfx.tracer);
+        break;
+      }
+      case 'explosion': {
+        const vol = this.volumeAt(e.x, e.y);
+        this.particles.explosion(e.x, e.y, '#8ad8ff');
+        this.particles.ring(e.x, e.y, e.radius, '120, 220, 255');
+        this.camera.addShake(3 * vol);
+        sound.explosion(0.4 * vol);
+        break;
+      }
+      case 'zombieHit': {
+        this.fxOf(e.zombie).hitFlash = 0.08;
+        this.particles.blood(e.x, e.y, e.angle, 6);
+        if (mine && e.points > 0) {
+          const z = this.world.zombies.find((z) => z.id === e.zombie);
+          pts(e.points, z?.x ?? e.x, (z?.y ?? e.y) - 16);
+          sound.hit();
+        }
+        break;
+      }
+      case 'zombieKilled':
+        pts(e.points, e.x, e.y - 16);
+        this.particles.bloodPool(e.x, e.y);
+        sound.zombieDeath(this.volumeAt(e.x, e.y));
+        this.zombieFx.delete(e.zombie);
+        break;
+      case 'knife':
+        this.playerFxOf(e.player).knifeSwing = KNIFE.swing;
+        sound.knife(e.hit, this.volumeOf(e.player));
+        if (mine && e.hit) this.camera.addShake(2);
+        break;
+      case 'reload':
+        if (mine) sound.reload();
+        break;
+      case 'playerHurt':
+        this.playerFxOf(e.player).hurtFlash = 1;
+        this.particles.blood(e.x, e.y, rand(0, TAU), 8);
+        if (mine) {
+          this.camera.addShake(7);
+          sound.hurt();
+        }
+        break;
+      case 'secondWind':
+        if (mine) this.showCallout('SECOND WIND', PERK_VISUALS.secondWind.color);
+        else this.addFeed(`${this.nameOf(e.player)} got a Second Wind`, PERK_VISUALS.secondWind.color);
+        sound.revive(this.volumeOf(e.player));
+        break;
+      case 'playerDowned':
+        if (mine) {
+          this.showCallout('YOU ARE DOWN', DOWN_RED);
+          this.camera.addShake(10);
+          sound.hurt();
+        } else {
+          this.addFeed(`${this.nameOf(e.player)} is down!`, DOWN_RED);
+          sound.denied();
+        }
+        break;
+      case 'playerRevived':
+        if (mine) this.showCallout('REVIVED', WHITE);
+        else this.addFeed(e.by === this.you ? `You revived ${this.nameOf(e.player)}` : `${this.nameOf(e.by)} revived ${this.nameOf(e.player)}`);
+        sound.revive(Math.max(this.volumeOf(e.player), this.volumeOf(e.by)));
+        break;
+      case 'playerDied':
+        if (mine) this.showCallout('YOU BLED OUT', DOWN_RED);
+        else this.addFeed(`${this.nameOf(e.player)} bled out`, DOWN_RED);
+        break;
+      case 'playerRespawned':
+        if (mine) {
+          this.camera.snap(e.x, e.y);
+          this.playerText('Back in', WHITE);
+        } else {
+          this.addFeed(`${this.nameOf(e.player)} is back`);
+        }
+        break;
+      case 'gameOver':
+        // The room follows with a `gameOver` message carrying the results.
+        break;
+      case 'plankTorn':
+        this.particles.debris(e.x, e.y);
+        sound.plankTear(this.volumeAt(e.x, e.y));
+        break;
+      case 'plankPlaced':
+        sound.plankPlace(mine ? 1 : this.volumeAt(e.x, e.y));
+        pts(e.points, e.x, e.y - 10);
+        break;
+      case 'doorOpened':
+        this.particles.debris(e.x, e.y);
+        sound.door();
+        break;
+      case 'denied':
+        if (!mine) break;
+        this.playerText('Not enough points', '#d05050');
+        sound.denied();
+        break;
+      case 'weaponGiven':
+        if (!mine) break;
+        this.playerText(weaponName(e.weapon, e.tier), WHITE);
+        sound.buy();
+        break;
+      case 'ammoBought':
+        if (!mine) break;
+        this.playerText('Ammo', WHITE);
+        sound.buy();
+        break;
+      case 'perkBought':
+        if (!mine) break;
+        this.playerText(PERKS[e.perk].name, PERK_VISUALS[e.perk].color);
+        sound.perk();
+        break;
+      case 'armourBought':
+        if (!mine) break;
+        this.playerText(`Armour ${e.level}`, '#7aa8ff');
+        sound.armour();
+        break;
+      case 'upgraded':
+        if (!mine) break;
+        this.playerText(weaponName(e.weapon, e.tier), '#c890ff');
+        sound.upgrade();
+        break;
+      case 'powerUp':
+        // Shared: everyone gets the callout.
+        this.showCallout(POWERUPS[e.id].name.toUpperCase(), POWERUP_VISUALS[e.id].color);
+        sound.powerUp();
+        if (e.id === 'nuke') {
+          this.screenFlash = 1;
+          this.camera.addShake(14);
+          sound.explosion();
+        }
+        break;
+      case 'roundStart':
+        this.showBanner(`ROUND ${e.round}`);
+        sound.roundStart();
+        break;
+      case 'roundEnd':
+        this.showBanner(`ROUND ${e.round} SURVIVED`);
+        sound.roundEnd();
+        break;
+      case 'boxTick':
+        sound.boxTick();
+        break;
+      case 'boxReveal':
+        sound.boxReveal();
+        break;
     }
-    this.showCallout('SECOND WIND', '#3a8ad0');
-    sound.revive();
-  }
-
-  private gameOver(): void {
-    this.state = 'gameover';
-    this.gameOverTimer = 0;
-    sound.gameOver();
-    const survived = Math.max(0, this.rounds.round - 1);
-    if (survived > 0 || this.kills > 0) {
-      void this.scores.record(this.mapDoc.id, { round: survived, kills: this.kills, points: this.economy.earned });
-    }
-  }
-
-  tearPlank(b: Barricade): void {
-    if (!b.tear()) return;
-    this.particles.debris(b.center.x, b.center.y);
-    sound.plankTear(this.volumeAt(b.center.x, b.center.y));
-  }
-
-  rebuildPlank(b: Barricade): void {
-    if (!b.rebuild()) return;
-    sound.plankPlace();
-    if (this.economy.rebuildLeft >= POINTS.plank) {
-      this.economy.rebuildLeft -= POINTS.plank;
-      const pts = this.economy.award(POINTS.plank);
-      this.particles.text(`+${pts}`, b.center.x, b.center.y - 10);
-    }
-  }
-
-  /** Put a weapon in the empty slot, or replace the one in hand. */
-  giveWeapon(w: Weapon): void {
-    const p = this.player;
-    const empty = p.weapons.indexOf(null);
-    const slot = empty >= 0 ? empty : p.slot;
-    p.weapon.cancelReload();
-    p.weapons[slot] = w;
-    p.slot = slot;
-    this.particles.text(w.name, p.x, p.y - 20, '#ffffff');
-  }
-
-  openDoor(door: Door): void {
-    door.open = true;
-    for (const [tx, ty] of door.def.tiles) this.map.set(tx, ty, Tile.Floor);
-    for (const r of door.def.rooms) this.openRooms.add(r);
-    this.flow.invalidate();
-    this.particles.debris(door.standX, door.standY);
-    sound.door();
-  }
-
-  denied(): void {
-    this.particles.text('Not enough points', this.player.x, this.player.y - 20, '#d05050');
-    sound.denied();
   }
 
   // ---------------------------------------------------------------- render
 
   private render(): void {
     const ctx = this.ctx;
+    const { level, world } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -554,20 +720,23 @@ export class Game {
     ctx.translate(-cx, -cy);
     ctx.drawImage(this.mapCanvas, 0, 0);
     this.particles.drawDecals(ctx);
-    for (const it of this.interactables) it.draw(ctx, this);
-    for (const b of this.barricades) drawWindow(ctx, b);
-    for (const z of this.zombies) drawZombie(ctx, z, this.rounds.round);
-    drawPlayer(ctx, this.player);
+    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time));
+    level.windows.forEach((w, i) => drawWindow(ctx, w, world.windows[i]));
+    for (const z of world.zombies) drawZombie(ctx, z, this.fxOf(z.id), world.round.n);
+    // The local player on top of teammates.
+    const players = [...world.players].sort((a, b) => Number(a.id === this.you) - Number(b.id === this.you));
+    for (const p of players) drawPlayer(ctx, p, this.playerFxOf(p.id), p.id === this.you);
     this.particles.draw(ctx);
     ctx.restore();
 
-    this.lighting.draw(ctx, this, cx, cy);
+    this.lighting.draw(ctx, level, world, (id) => this.playerFxOf(id), cx, cy);
 
     ctx.save();
     ctx.translate(-cx, -cy);
     this.particles.drawGlow(ctx);
-    this.powerUps.draw(ctx, this.time);
-    for (const it of this.interactables) it.drawOverlay(ctx, this);
+    drawPowerUps(ctx, world.powerUps.drops, this.time);
+    level.fixtures.forEach((f, i) => drawInteractableOverlay(ctx, f, world.interactables[i], this.time));
+    for (const p of players) drawPlayerOverlay(ctx, p, p.id === this.you, this.time);
     this.particles.drawTexts(ctx);
     ctx.restore();
 
@@ -579,7 +748,7 @@ export class Game {
     if (this.state !== 'menu') drawHUD(ctx, this);
     if (this.state === 'menu' || this.state === 'paused') this.menu.draw(ctx, this);
     else if (this.state === 'gameover') drawGameOver(ctx, this);
-    else drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, this.player.weapon.def.pellets > 1 ? 10 : 5);
+    else drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, WEAPONS[heldWeapon(this.me).id].pellets > 1 ? 10 : 5);
 
     const cursor = this.state === 'playing' ? 'none' : 'default';
     if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;

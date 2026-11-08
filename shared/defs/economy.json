@@ -1,0 +1,11 @@
+{
+  "startingPoints": 500,
+  "rebuildCap": 500,
+  "points": { "hit": 10, "kill": 60, "headshotKill": 100, "knifeKill": 130, "plank": 10, "nuke": 400 },
+  "boxCost": 950,
+  "armour": {
+    "levels": [{ "cap": 0, "cost": 0 }, { "cap": 50, "cost": 1500 }, { "cap": 100, "cost": 3000 }, { "cap": 150, "cost": 5000 }],
+    "absorb": 0.7,
+    "repairCostPerLevel": 250
+  }
+}

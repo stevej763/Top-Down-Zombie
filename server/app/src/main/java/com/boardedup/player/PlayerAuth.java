@@ -4,6 +4,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Optional;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -34,12 +35,18 @@ public class PlayerAuth {
         }
     }
 
+    /** The player a raw token belongs to, if any. */
+    public Optional<Player> find(String token) {
+        if (token == null || token.isBlank()) return Optional.empty();
+        return players.findByTokenHash(hash(token.trim()));
+    }
+
     /** The player for an {@code Authorization: Bearer ...} header, or 401. */
     public Player require(String authorization) {
         if (authorization == null || !authorization.startsWith(BEARER)) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
-        return players.findByTokenHash(hash(authorization.substring(BEARER.length()).trim()))
+        return find(authorization.substring(BEARER.length()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unknown token"));
     }
 }

@@ -1,5 +1,5 @@
 import { rand } from '../core/math';
-import type { WeaponId } from '../weapons/WeaponDefs';
+import type { WeaponId } from '../game/defs';
 import { TRACKS, type Track } from './tracks';
 
 // Gains at 100% on the matching slider.
@@ -212,15 +212,16 @@ class Sound {
     this.noise({ dur: 0.06, freq: 900, gain: 0.15 });
   }
 
-  shot(id: WeaponId): void {
+  /** `vol` is 1 for your own shots; teammates' fade with distance. */
+  shot(id: WeaponId, vol = 1): void {
     const s = SHOTS[id];
-    this.noise(s.noise);
-    this.tone(s.tone);
+    this.noise(s.noise, vol);
+    this.tone(s.tone, vol);
   }
 
-  knife(hit: boolean): void {
-    this.noise({ dur: 0.12, freq: 3500, gain: 0.25, type: 'highpass' });
-    if (hit) this.noise({ dur: 0.1, freq: 400, gain: 0.45, delay: 0.04 });
+  knife(hit: boolean, vol = 1): void {
+    this.noise({ dur: 0.12, freq: 3500, gain: 0.25, type: 'highpass' }, vol);
+    if (hit) this.noise({ dur: 0.1, freq: 400, gain: 0.45, delay: 0.04 }, vol);
   }
 
   reload(): void {
@@ -271,9 +272,9 @@ class Sound {
     this.tone({ freq: 220, to: 90, dur: 0.12, gain: 0.25, type: 'triangle' }, vol);
   }
 
-  plankPlace(): void {
-    this.tone({ freq: 140, to: 80, dur: 0.12, gain: 0.4, type: 'triangle' });
-    this.noise({ dur: 0.05, freq: 900, gain: 0.3 });
+  plankPlace(vol = 1): void {
+    this.tone({ freq: 140, to: 80, dur: 0.12, gain: 0.4, type: 'triangle' }, vol);
+    this.noise({ dur: 0.05, freq: 900, gain: 0.3 }, vol);
   }
 
   buy(): void {
@@ -325,8 +326,8 @@ class Sound {
     this.noise({ dur: 0.12, freq: 800, gain: 0.3 });
   }
 
-  revive(): void {
-    [262, 392, 523, 784].forEach((f, i) => this.tone({ freq: f, dur: 0.4, gain: 0.2, type: 'triangle', delay: i * 0.12 }));
+  revive(vol = 1): void {
+    [262, 392, 523, 784].forEach((f, i) => this.tone({ freq: f, dur: 0.4, gain: 0.2, type: 'triangle', delay: i * 0.12 }, vol));
   }
 
   roundStart(): void {

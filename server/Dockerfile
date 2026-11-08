@@ -1,12 +1,17 @@
-# Built from the repo root (see docker-compose.yml) because the jar bundles ../maps.
+# syntax=docker/dockerfile:1
+# Built from the repo root (see docker-compose.yml) because the jar bundles ../maps and ../shared/defs.
 
 # --- Build stage: compile and package the Spring Boot jar ---
 FROM gradle:9-jdk25 AS build
 WORKDIR /src
 COPY server server
 COPY maps maps
+COPY shared shared
 WORKDIR /src/server
-RUN ./gradlew :app:bootJar --no-daemon -q
+# The cache mount keeps the Gradle home (wrapper distribution, dependencies, build cache) between
+# builds. It isn't part of any layer, so it survives source changes that rebuild this one.
+RUN --mount=type=cache,id=boarded-up-gradle,target=/home/gradle/.gradle \
+    ./gradlew :app:bootJar --no-daemon --build-cache -q
 
 # --- Runtime stage ---
 FROM eclipse-temurin:25-jre-alpine

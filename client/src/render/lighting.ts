@@ -1,10 +1,12 @@
-import type { Game } from '../core/Game';
+import type { Level } from '../view/Level';
+import { heldWeapon, type WorldView } from '../view/WorldView';
+import { glowOf, WEAPON_FX, type PlayerFx } from './visuals';
 
 const DARKNESS = 'rgba(4, 5, 10, 0.86)';
 const FLASHLIGHT_RANGE = 430;
 const FLASHLIGHT_HALF_ANGLE = 0.5;
 
-/** Darkness overlay with lights punched out of it (player glow, flashlight cone, windows). */
+/** Darkness overlay with lights punched out of it (each player's glow and flashlight cone, windows). */
 export class Lighting {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -16,7 +18,10 @@ export class Lighting {
     this.ctx = this.canvas.getContext('2d')!;
   }
 
-  draw(target: CanvasRenderingContext2D, game: Game, camX: number, camY: number): void {
+  /** `fxOf` gives each player's muzzle-flash state. */
+  draw(
+    target: CanvasRenderingContext2D, level: Level, world: WorldView, fxOf: (id: number) => PlayerFx, camX: number, camY: number,
+  ): void {
     const c = this.ctx;
     c.globalCompositeOperation = 'source-over';
     c.clearRect(0, 0, this.w, this.h);
@@ -24,50 +29,58 @@ export class Lighting {
     c.fillRect(0, 0, this.w, this.h);
     c.globalCompositeOperation = 'destination-out';
 
-    const p = game.player;
-    const px = p.x - camX;
-    const py = p.y - camY;
-    this.glow(px, py, 150, 0.95);
-
-    const g = c.createRadialGradient(px, py, 20, px, py, FLASHLIGHT_RANGE);
-    g.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
-    g.addColorStop(0.7, 'rgba(0, 0, 0, 0.6)');
-    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    c.fillStyle = g;
-    c.beginPath();
-    c.moveTo(px, py);
-    c.arc(px, py, FLASHLIGHT_RANGE, p.aim - FLASHLIGHT_HALF_ANGLE, p.aim + FLASHLIGHT_HALF_ANGLE);
-    c.closePath();
-    c.fill();
-
-    for (const b of game.barricades) this.glow(b.center.x - camX, b.center.y - camY, 110, 0.55);
-    for (const it of game.interactables) {
-      if (it.glow) this.glow(it.standX - camX, it.standY - camY, 60, 0.45);
+    // Everyone carries a light; a downed player's torch has dropped, so only their glow is left.
+    const lit = world.players.filter((p) => p.state !== 'dead');
+    for (const p of lit) {
+      const px = p.x - camX;
+      const py = p.y - camY;
+      if (p.state === 'downed') {
+        this.glow(px, py, 110, 0.8);
+        continue;
+      }
+      this.glow(px, py, 150, 0.95);
+      const g = c.createRadialGradient(px, py, 20, px, py, FLASHLIGHT_RANGE);
+      g.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
+      g.addColorStop(0.7, 'rgba(0, 0, 0, 0.6)');
+      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.moveTo(px, py);
+      c.arc(px, py, FLASHLIGHT_RANGE, p.aim - FLASHLIGHT_HALF_ANGLE, p.aim + FLASHLIGHT_HALF_ANGLE);
+      c.closePath();
+      c.fill();
     }
-    for (const d of game.powerUps.drops) this.glow(d.x - camX, d.y - camY, 70, 0.6);
-    if (p.flash > 0) this.glow(px, py, 260, 0.7);
+
+    for (const b of level.windows) this.glow(b.center.x - camX, b.center.y - camY, 110, 0.55);
+    for (const f of level.fixtures) {
+      if (glowOf(f)) this.glow(f.x - camX, f.y - camY, 60, 0.45);
+    }
+    for (const d of world.powerUps.drops) this.glow(d.x - camX, d.y - camY, 70, 0.6);
+    const firing = lit.filter((p) => p.state === 'alive' && fxOf(p.id).flash > 0);
+    for (const p of firing) this.glow(p.x - camX, p.y - camY, 260, 0.7);
 
     target.drawImage(this.canvas, 0, 0);
 
     // Coloured light from machines, added on top of the darkness.
     target.save();
     target.globalCompositeOperation = 'lighter';
-    for (const it of game.interactables) {
-      if (!it.glow) continue;
-      const x = it.standX - camX;
-      const y = it.standY - camY;
+    for (const f of level.fixtures) {
+      const glow = glowOf(f);
+      if (!glow) continue;
+      const x = f.x - camX;
+      const y = f.y - camY;
       const g = target.createRadialGradient(x, y, 0, x, y, 70);
-      g.addColorStop(0, `rgba(${it.glow}, 0.22)`);
-      g.addColorStop(1, `rgba(${it.glow}, 0)`);
+      g.addColorStop(0, `rgba(${glow}, 0.22)`);
+      g.addColorStop(1, `rgba(${glow}, 0)`);
       target.fillStyle = g;
       target.fillRect(x - 70, y - 70, 140, 140);
     }
-    if (p.flash > 0) {
+    for (const p of firing) {
       // Muzzle light in the gun's own colour.
-      const fx = p.weapon.def.fx;
-      const md = 24 + p.weapon.def.barrel;
-      const x = px + Math.cos(p.aim) * md;
-      const y = py + Math.sin(p.aim) * md;
+      const fx = WEAPON_FX[heldWeapon(p).id];
+      const md = 24 + fx.barrel;
+      const x = p.x - camX + Math.cos(p.aim) * md;
+      const y = p.y - camY + Math.sin(p.aim) * md;
       const r = 110 * fx.flashSize;
       const g = target.createRadialGradient(x, y, 0, x, y, r);
       g.addColorStop(0, `rgba(${fx.flash}, 0.35)`);

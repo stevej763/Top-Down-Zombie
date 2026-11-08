@@ -1,5 +1,6 @@
 *
 !server
 !maps
+!shared
 server/.gradle
 server/**/build

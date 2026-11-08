@@ -1,4 +1,4 @@
-import type { MapDoc } from '../world/MapData';
+import type { MapDoc } from '../game/MapData';
 
 /** REST client for the Spring Boot server. Every call can fail (server down, offline); callers fall back. */
 
@@ -52,6 +52,13 @@ function saveIdentity(id: Identity): void {
   }
 }
 
+/** A failed request; `status` is 0 when the server didn't answer. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -61,7 +68,7 @@ async function request<T>(method: string, path: string, body?: unknown, token?: 
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`${method} ${path}: ${res.status}`);
+  if (!res.ok) throw new ApiError(`${method} ${path}: ${res.status}`, res.status);
   return res.json() as Promise<T>;
 }
 
@@ -75,24 +82,34 @@ export async function setName(name: string): Promise<Identity> {
   saveIdentity(id);
   try {
     if (id.token) {
-      await request('PATCH', '/players/me', { name }, id.token);
-    } else {
-      const r = await request<{ playerId: string; token: string }>('POST', '/players', { name });
-      id.playerId = r.playerId;
-      id.token = r.token;
-      saveIdentity(id);
+      try {
+        await request('PATCH', '/players/me', { name }, id.token);
+        return id;
+      } catch (e) {
+        // The server no longer knows this token (its database was reset): register afresh.
+        if (!(e instanceof ApiError && e.status === 401)) throw e;
+        delete id.token;
+        delete id.playerId;
+      }
     }
+    const r = await request<{ playerId: string; token: string }>('POST', '/players', { name });
+    id.playerId = r.playerId;
+    id.token = r.token;
+    saveIdentity(id);
   } catch {
-    // Offline: keep the local name; registration is retried on the next score submit.
+    // Offline: keep the local name; registration is retried when connecting to a game.
   }
   return id;
 }
 
-/** The identity with a server token, registering it first if needed. Null if that isn't possible. */
-async function registered(): Promise<Identity | null> {
+/**
+ * The identity with a server token, registering it first if needed. With `verify`, the token is
+ * checked (and replaced if the server rejects it). Null if there's no name or no server.
+ */
+export async function ensureRegistered(verify = false): Promise<Identity | null> {
   const id = loadIdentity();
   if (!id) return null;
-  if (id.token) return id;
+  if (id.token && !verify) return id;
   const r = await setName(id.name);
   return r.token ? r : null;
 }
@@ -107,11 +124,4 @@ export function fetchMap(id: string): Promise<MapDoc> {
 
 export function fetchScores(mapId: string, limit: number): Promise<ServerScore[]> {
   return request<ServerScore[]>('GET', `/scores?map=${encodeURIComponent(mapId)}&limit=${limit}`);
-}
-
-/** Resolves to the stored score, or null if there's no registered identity. Throws if the server fails. */
-export async function submitScore(s: { mapId: string; round: number; kills: number; points: number }): Promise<ServerScore | null> {
-  const id = await registered();
-  if (!id) return null;
-  return request<ServerScore>('POST', '/scores', s, id.token);
 }

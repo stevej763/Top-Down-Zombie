@@ -31,7 +31,9 @@ services:
     restart: unless-stopped
 
   web:
-    build: ./client
+    build:
+      context: .
+      dockerfile: client/Dockerfile
     image: boarded-up
     ports:
       - "8551:80"

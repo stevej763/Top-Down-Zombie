@@ -1,5 +1,6 @@
 package com.boardedup.map;
 
+import com.boardedup.sim.map.MapDoc;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;

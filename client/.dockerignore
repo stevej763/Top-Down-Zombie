@@ -1,7 +1,0 @@
-node_modules
-dist
-.git
-Dockerfile
-docker-compose.yml
-# The unsplit source soundtrack isn't used by the game.
-public/audio/sound-track.mp3
