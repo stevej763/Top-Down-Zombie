@@ -1,0 +1,7 @@
+services:
+  game:
+    build: .
+    image: boarded-up
+    ports:
+      - "8551:80"
+    restart: unless-stopped
