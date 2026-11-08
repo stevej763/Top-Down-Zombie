@@ -1,2 +1,10 @@
 node_modules
 dist
+.DS_Store
+
+# Gradle
+.gradle
+build
+
+# The unsplit source soundtrack isn't used by the game.
+client/public/audio/sound-track.mp3

@@ -1,7 +1,43 @@
 services:
-  game:
-    build: .
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: boardedup
+      POSTGRES_USER: boardedup
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-boardedup}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boardedup -d boardedup"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: boarded-up-server
+    environment:
+      # Set in a .env file to enable PUT /api/maps/{id}.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DB_URL: jdbc:postgresql://db:5432/boardedup
+      DB_USER: boardedup
+      DB_PASSWORD: ${DB_PASSWORD:-boardedup}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./client
     image: boarded-up
     ports:
       - "8551:80"
+    depends_on:
+      - server
     restart: unless-stopped
+
+volumes:
+  db-data:
