@@ -6,6 +6,13 @@ export const UPGRADE_COST = [0, 3000, 6000];
 const TIER_DAMAGE = [1, 1.75, 2.75];
 const TIER_AMMO = [1, 1.5, 2];
 const TIER_SUFFIX = ['', ' Mk II', ' Mk III'];
+export interface Halo {
+  /** "r, g, b" */
+  color: string;
+  width: number;
+}
+/** Glow around an upgraded weapon's tracers. */
+const TIER_HALO: (Halo | null)[] = [null, { color: '170, 110, 255', width: 7 }, { color: '230, 140, 255', width: 10 }];
 
 export class Weapon {
   tier = 0;
@@ -13,6 +20,7 @@ export class Weapon {
   reserve: number;
   cooldown = 0;
   reloadTimer = 0;
+  private reloadDuration = 1;
 
   constructor(readonly def: WeaponDef) {
     this.mag = this.magSize;
@@ -40,6 +48,15 @@ export class Weapon {
     return this.def.ammoCost * (1 + this.tier * 2);
   }
 
+  get halo(): Halo | null {
+    return TIER_HALO[this.tier];
+  }
+
+  /** 0..1 through the current reload. */
+  get reloadProgress(): number {
+    return this.reloading ? 1 - this.reloadTimer / this.reloadDuration : 0;
+  }
+
   get reloading(): boolean {
     return this.reloadTimer > 0;
   }
@@ -62,7 +79,7 @@ export class Weapon {
 
   startReload(timeMult = 1): boolean {
     if (this.reloading || this.mag >= this.magSize || this.reserve <= 0) return false;
-    this.reloadTimer = this.def.reloadTime * timeMult;
+    this.reloadTimer = this.reloadDuration = this.def.reloadTime * timeMult;
     return true;
   }
 

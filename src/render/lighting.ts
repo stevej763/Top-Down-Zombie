@@ -62,6 +62,19 @@ export class Lighting {
       target.fillStyle = g;
       target.fillRect(x - 70, y - 70, 140, 140);
     }
+    if (p.flash > 0) {
+      // Muzzle light in the gun's own colour.
+      const fx = p.weapon.def.fx;
+      const md = 24 + p.weapon.def.barrel;
+      const x = px + Math.cos(p.aim) * md;
+      const y = py + Math.sin(p.aim) * md;
+      const r = 110 * fx.flashSize;
+      const g = target.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${fx.flash}, 0.35)`);
+      g.addColorStop(1, `rgba(${fx.flash}, 0)`);
+      target.fillStyle = g;
+      target.fillRect(x - r, y - r, r * 2, r * 2);
+    }
     target.restore();
   }
 

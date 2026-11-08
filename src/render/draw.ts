@@ -344,16 +344,18 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player): void {
 
   if (p.flash > 0) {
     const mx = 14 + barrel + 4;
-    ctx.fillStyle = '#ffe9a0';
+    const fx = p.weapon.def.fx;
+    const s = fx.flashSize;
+    ctx.fillStyle = `rgb(${fx.flash})`;
     ctx.beginPath();
-    ctx.moveTo(mx - 3, -4);
-    ctx.lineTo(mx + 10, 0);
-    ctx.lineTo(mx - 3, 4);
+    ctx.moveTo(mx - 3 * s, -4 * s);
+    ctx.lineTo(mx + 10 * s, 0);
+    ctx.lineTo(mx - 3 * s, 4 * s);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = '#fff6d8';
+    ctx.fillStyle = '#fffaf0';
     ctx.beginPath();
-    ctx.arc(mx, 0, 3.5, 0, TAU);
+    ctx.arc(mx, 0, 3 * s, 0, TAU);
     ctx.fill();
   }
   ctx.restore();

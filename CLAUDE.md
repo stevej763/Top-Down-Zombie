@@ -69,6 +69,7 @@ Visuals, lighting and audio have **not** been checked in a real browser by an ag
 4. **Soundtrack:** split into 20 tracks, played shuffled, with a now-playing toast.
 5. **Docker:** multi-stage build to an nginx image (`nginx.conf` sets caching and gzip) and a compose file. **Knife** melee added.
 6. **Main menu:** real title menu (New Game, High Scores, Audio, Controls), pause menu (Resume, Audio, Controls, Quit), top-10 leaderboard, persisted volume sliders.
+7. **Effects pass:** per-weapon `fx` in `WeaponDefs` (tracer colour/width, muzzle flash colour, casing type), tracers drawn additively after lighting so they glow, violet tracer halos on upgraded guns, shell casings and bullet holes that fade after 18 s (`Particles` timed decals, capped at 300), plasma shockwave ring, reload progress bar.
 
 Names (perks, power-ups, "Boarded Up") are deliberately original; keep it that way rather than copying names from existing games.
 

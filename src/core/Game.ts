@@ -287,6 +287,7 @@ export class Game {
     for (let i = 0; i < def.pellets; i++) {
       this.traceShot(p.x, p.y, mx, my, base + rand(-def.spread / 2, def.spread / 2), w);
     }
+    if (def.fx.casing) this.particles.casing(p.x + Math.cos(p.aim) * 12, p.y + Math.sin(p.aim) * 12, p.aim, def.fx.casing);
     p.flash = 0.05;
     this.camera.addShake(def.shake);
     sound.shot(def.id);
@@ -323,11 +324,12 @@ export class Game {
 
     const ex = ox + dx * end;
     const ey = oy + dy * end;
-    this.particles.tracer(mx, my, ex, ey, def.tracer);
+    this.particles.tracer(mx, my, ex, ey, def.fx, w.halo);
     if (def.splash) {
       this.explode(ex, ey, def.splash.radius, def.splash.damage * (w.damage / def.damage));
     } else if (end === wallD && wallD < def.range) {
-      this.particles.sparks(ex, ey);
+      // Back the mark off the wall face so it sits on the visible side.
+      this.particles.impact(ex - dx * 1.5, ey - dy * 1.5, angle + Math.PI, def.fx.tracer);
     }
   }
 
@@ -366,6 +368,7 @@ export class Game {
       }
     }
     this.particles.explosion(x, y, '#8ad8ff');
+    this.particles.ring(x, y, radius, '120, 220, 255');
     this.camera.addShake(3);
     sound.explosion(0.4);
   }
@@ -554,6 +557,7 @@ export class Game {
 
     ctx.save();
     ctx.translate(-cx, -cy);
+    this.particles.drawGlow(ctx);
     this.powerUps.draw(ctx, this.time);
     for (const it of this.interactables) it.drawOverlay(ctx, this);
     this.particles.drawTexts(ctx);

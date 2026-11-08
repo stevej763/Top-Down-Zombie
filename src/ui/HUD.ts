@@ -66,7 +66,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
 
   // Reload / ammo warnings, under the crosshair area.
   let warn = '';
-  if (w.reloading) warn = 'RELOADING';
+  if (w.reloading) drawReloadBar(ctx, w.reloadProgress);
   else if (w.mag === 0 && w.reserve === 0) warn = 'NO AMMO - KNIFE';
   else if (w.mag <= Math.ceil(w.magSize * 0.25)) warn = 'Press R to reload';
   if (warn) shadowText(ctx, warn, VIEW_W / 2, VIEW_H / 2 + 60, 'bold 16px monospace', warn.startsWith('NO AMMO') ? '#d03030' : '#ffffff', 'center');
@@ -116,4 +116,21 @@ function interactionPrompt(game: Game): { text: string; color: string } | null {
   if (!it) return null;
   if (it.kind === 'rebuild') return { text: 'Hold E to rebuild barricade', color: '#ffffff' };
   return it.target.prompt(game);
+}
+
+const RELOAD_BAR_W = 120;
+const RELOAD_BAR_H = 8;
+
+function drawReloadBar(ctx: CanvasRenderingContext2D, progress: number): void {
+  const x = (VIEW_W - RELOAD_BAR_W) / 2;
+  // Bottom centre: clear of the player, and below the interaction prompt box.
+  const y = VIEW_H - 56;
+  shadowText(ctx, 'RELOADING', VIEW_W / 2, y - 6, 'bold 12px monospace', '#d0d0d0', 'center');
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(x - 2, y - 2, RELOAD_BAR_W + 4, RELOAD_BAR_H + 4);
+  ctx.fillStyle = '#f2d15c';
+  ctx.fillRect(x, y, RELOAD_BAR_W * progress, RELOAD_BAR_H);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 1.5, y - 1.5, RELOAD_BAR_W + 3, RELOAD_BAR_H + 3);
 }
