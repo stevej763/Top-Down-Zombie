@@ -2,17 +2,19 @@ import { rand, TAU } from '../core/math';
 import {
   BLEEDOUT, KNIFE, PERKS, PLAYER_RADIUS, REVIVE_TIME, WEAPONS, ZOMBIE_RADIUS, type PerkDef, type WeaponDef,
 } from '../game/defs';
-import { Tile, TILE, TileMap } from '../game/TileMap';
+import { Tile, TILE } from '../game/TileMap';
 import { shadowText } from '../ui/text';
-import type { WallSpot } from '../game/MapData';
+import type { MapData, WallSpot } from '../game/MapData';
+import { drawFloorDecor, drawFurniture, furnitureTiles } from './furniture';
 import type { Fixture, LightArea, WindowFixture } from '../view/Level';
 import { heldWeapon, type DropView, type InteractableView, type PlayerView, type ZombieView } from '../view/WorldView';
 import {
   LOCAL_BODY, PERK_VISUALS, POWERUP_VISUALS, TEAM_BODIES, WEAPON_FX, type PlayerFx, type ZombieFx,
 } from './visuals';
 
-/** Pre-render the static map (floors, walls, crates, yard) to an offscreen canvas. */
-export function renderMap(map: TileMap): HTMLCanvasElement {
+/** Pre-render the static map (floors, decor, walls, furniture, crates, yard) to an offscreen canvas. */
+export function renderMap(data: MapData): HTMLCanvasElement {
+  const map = data.map;
   const c = document.createElement('canvas');
   c.width = map.pxW;
   c.height = map.pxH;
@@ -30,7 +32,7 @@ export function renderMap(map: TileMap): HTMLCanvasElement {
           ctx.fillStyle = Math.random() < 0.5 ? '#232b1e' : '#141911';
           ctx.fillRect(x + rand(0, TILE - 3), y + rand(0, TILE - 3), rand(2, 4), rand(2, 4));
         }
-      } else if (t === Tile.Floor || t === Tile.Window || t === Tile.Door) {
+      } else if (t !== Tile.Wall) {
         // Wooden floorboards: 4 boards per tile with staggered seams.
         for (let i = 0; i < 4; i++) {
           const shade = 34 + ((tx * 7 + ty * 13 + i * 5) % 6);
@@ -45,12 +47,16 @@ export function renderMap(map: TileMap): HTMLCanvasElement {
     }
   }
 
+  drawFloorDecor(ctx, map, data.decor);
+  // Plain crates are drawn where no furniture covers the tile; furniture draws its own shadow.
+  const furnished = furnitureTiles(map, data.decor);
+  const crate = (tx: number, ty: number) => map.get(tx, ty) === Tile.Crate && !furnished.has(ty * map.w + tx);
+
   // Shadows cast by walls/crates onto the floor below them.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   for (let ty = 0; ty < map.h; ty++) {
     for (let tx = 0; tx < map.w; tx++) {
-      const t = map.get(tx, ty);
-      if ((t === Tile.Wall || t === Tile.Crate) && map.get(tx, ty + 1) !== Tile.Wall) {
+      if ((map.get(tx, ty) === Tile.Wall || crate(tx, ty)) && map.get(tx, ty + 1) !== Tile.Wall) {
         ctx.fillRect(tx * TILE, (ty + 1) * TILE, TILE, 7);
       }
     }
@@ -68,7 +74,7 @@ export function renderMap(map: TileMap): HTMLCanvasElement {
         ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
         ctx.fillStyle = '#44444e';
         ctx.fillRect(x + 1, y + TILE / 2, TILE - 2, 1);
-      } else if (t === Tile.Crate) {
+      } else if (crate(tx, ty)) {
         ctx.fillStyle = '#4a361f';
         ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
         ctx.fillStyle = '#6d5130';
@@ -84,6 +90,7 @@ export function renderMap(map: TileMap): HTMLCanvasElement {
       }
     }
   }
+  drawFurniture(ctx, data.decor);
   return c;
 }
 

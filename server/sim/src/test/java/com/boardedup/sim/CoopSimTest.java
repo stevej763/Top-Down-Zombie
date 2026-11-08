@@ -71,7 +71,7 @@ class CoopSimTest {
         GameSim s = quiet(4);
         for (Player p : s.players) assertThat(s.map.tileAt(p.x, p.y)).isEqualTo(Tile.FLOOR);
         Player first = s.players.getFirst();
-        assertThat(first.x).isEqualTo(9 * T + T / 2);
+        assertThat(first.x).isEqualTo(17 * T + T / 2);
         assertThat(first.y).isEqualTo(9 * T + T / 2);
         assertThat(s.players.stream().map(p -> p.x + "," + p.y).distinct()).hasSize(4);
     }
@@ -139,9 +139,9 @@ class CoopSimTest {
         // The zombie is in the top-right room, just through the wall from A (no line of sight).
         // B is in the same room, farther in a straight line but nearer by path than A, who is
         // round through the door.
-        standOnTile(a, 17, 5);
-        standOnTile(b, 27, 9);
-        Zombie z = zombie(s, 21 * T + T / 2, 5 * T + T / 2, 1000, 70);
+        standOnTile(a, 20, 5);
+        standOnTile(b, 29, 8);
+        Zombie z = zombie(s, 23 * T + T / 2, 5 * T + T / 2, 1000, 70);
         assertThat(SimMath.dist(z.x, z.y, a.x, a.y)).isLessThan(SimMath.dist(z.x, z.y, b.x, b.y));
         assertThat(SimMath.dist(z.x, z.y, b.x, b.y)).isGreaterThan(180);
 
@@ -166,8 +166,8 @@ class CoopSimTest {
     void downedPlayerIsRevivedByATeammate() {
         GameSim s = quiet(2);
         Player a = s.player(1), b = s.player(2);
-        standAt(a, 300, 300);
-        standAt(b, 320, 300);
+        standAt(a, 300, 340);
+        standAt(b, 320, 340);
         s.damagePlayer(b, 1000);
         assertThat(b.state).isEqualTo(Player.State.DOWNED);
         assertThat(s.over).isFalse();
@@ -239,7 +239,7 @@ class CoopSimTest {
         assertThat(b.perks).isEmpty();
         assertThat(b.armourLevel).isZero();
         assertThat(b.economy.points).isEqualTo(1234);
-        assertThat(SimMath.dist(b.x, b.y, 9 * T + T / 2, 9 * T + T / 2)).isLessThan(40);
+        assertThat(SimMath.dist(b.x, b.y, 17 * T + T / 2, 9 * T + T / 2)).isLessThan(40);
         assertThat(emitted(s, SimEvent.PlayerRespawned.class)).isTrue();
     }
 

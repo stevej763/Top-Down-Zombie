@@ -10,6 +10,8 @@ export const Tile = {
   Crate: 4,
   /** Closed, purchasable door. Becomes Floor when opened. */
   Door: 5,
+  /** Low furniture (tables, beds, counters): blocks walking but not bullets. */
+  Low: 6,
 } as const;
 export type TileType = (typeof Tile)[keyof typeof Tile];
 

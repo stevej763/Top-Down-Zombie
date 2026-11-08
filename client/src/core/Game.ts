@@ -193,7 +193,7 @@ export class Game {
     this.level = level;
     const map = level.data.map;
     this.world = restingWorld(level, this.you, loadIdentity()?.name ?? '');
-    this.mapCanvas = renderMap(map);
+    this.mapCanvas = renderMap(level.data);
     this.particles = new Particles(map.pxW, map.pxH);
     this.camera = new Camera(VIEW_W, VIEW_H, map.pxW, map.pxH);
     this.camera.snap(this.me.x, this.me.y);

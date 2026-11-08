@@ -9,6 +9,8 @@ public final class Tile {
     public static final int CRATE = 4;
     /** Closed, purchasable door. Becomes FLOOR when opened. */
     public static final int DOOR = 5;
+    /** Low furniture (tables, beds, counters): blocks walking but not bullets. */
+    public static final int LOW = 6;
 
     private Tile() {}
 }

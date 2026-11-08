@@ -24,10 +24,13 @@ import java.util.regex.Pattern;
  */
 public final class MapValidator {
     public static final Pattern ID_PATTERN = Pattern.compile("^[a-z0-9-]{1,40}$");
-    private static final String TILE_CHARS = "._#WCD";
+    private static final String TILE_CHARS = "._#WCDT";
     private static final int MIN_SIZE = 10;
     private static final int MAX_SIZE = 200;
     private static final int MAX_DOOR_COST = 100_000;
+    private static final Pattern DECOR_KIND = Pattern.compile("^[a-zA-Z]{1,30}$");
+    private static final Set<String> FACES = Set.of("n", "e", "s", "w");
+    private static final int MAX_DECOR = 1000;
 
 
     private MapValidator() {}
@@ -70,6 +73,7 @@ public final class MapValidator {
             List<int[]> doorLinks = checkDoors();
             checkWallSpots();
             checkBox();
+            checkDecor();
             checkRooms(doorLinks);
         }
 
@@ -118,9 +122,9 @@ public final class MapValidator {
                     int x = i % w, y = i / w;
                     for (int[] d : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
                         int nx = x + d[0], ny = y + d[1];
-                        // Crates sit inside rooms, so they don't split them.
+                        // Furniture sits inside rooms, so it doesn't split them.
                         char c = at(nx, ny);
-                        if ((c == '_' || c == 'C') && region[ny * w + nx] < 0) {
+                        if ((c == '_' || c == 'C' || c == 'T') && region[ny * w + nx] < 0) {
                             region[ny * w + nx] = next;
                             queue.add(ny * w + nx);
                         }
@@ -238,6 +242,22 @@ public final class MapValidator {
             TilePos b = m.box();
             if (at(b.tx(), b.ty()) != 'C' || at(b.tx() + 1, b.ty()) != 'C') err("box: tiles " + b.tx() + "," + b.ty() + " and the one to its right must be crates ('C')");
             if (regionAt(b.tx(), b.ty() + 1) < 0) err("box: the tile below it must be floor");
+        }
+
+        /** Decor is cosmetic, so only its shape is checked: the client skips kinds it doesn't know. */
+        void checkDecor() {
+            if (m.decor() == null) return;
+            if (m.decor().size() > MAX_DECOR) err("decor: at most " + MAX_DECOR + " pieces");
+            for (MapDoc.Decor d : m.decor()) {
+                if (d == null || d.kind() == null || !DECOR_KIND.matcher(d.kind()).matches()) {
+                    err("decor: kind must match " + DECOR_KIND.pattern());
+                    continue;
+                }
+                String what = "decor " + d.kind() + " at " + d.tx() + "," + d.ty();
+                if (d.w() < 1 || d.h() < 1) err(what + ": w and h must be at least 1");
+                else if (d.tx() < 0 || d.ty() < 0 || d.tx() + d.w() > m.width() || d.ty() + d.h() > m.height()) err(what + ": must be inside the map");
+                if (d.face() != null && !FACES.contains(d.face())) err(what + ": face must be n, e, s or w");
+            }
         }
 
         void checkRooms(List<int[]> doorLinks) {

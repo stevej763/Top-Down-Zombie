@@ -367,6 +367,23 @@ class GameSimTest {
     }
 
     @Test
+    void lowFurnitureBlocksWalkingButNotBullets() {
+        GameSim s = quiet();
+        double t = TileMap.TILE;
+        // The living-room sofa fills row 11 from x 11 to 14; stand just south of it and shoot over it.
+        assertThat(s.map.get(12, 11)).isEqualTo(Tile.LOW);
+        standAt(s, 13 * t, 13 * t + t / 2);
+        Zombie z = zombie(s, 13 * t, 10 * t + t / 2, 1000);
+        press(s, b -> b.aim(-Math.PI / 2).fire());
+        assertThat(z.hp).isLessThan(1000);
+
+        for (int i = 0; i < 60; i++) press(s, b -> b.move(0, -1));
+        assertThat(player(s).y).isGreaterThanOrEqualTo(12 * t + Player.RADIUS - 0.01);
+        assertThat(s.map.hasLOS(player(s).x, player(s).y, z.x, z.y)).isTrue();
+        assertThat(s.map.hasWalkLine(player(s).x, player(s).y, z.x, z.y)).isFalse();
+    }
+
+    @Test
     void rebuildingPaysUntilTheRoundCap() {
         GameSim s = quiet();
         Barricade b = s.barricades.getFirst();

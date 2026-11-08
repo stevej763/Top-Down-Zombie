@@ -30,6 +30,17 @@ export interface PerkSpot extends WallSpot {
   perk: PerkId;
 }
 
+/** Cosmetic: furniture, rugs and floor finishes over a w×h tile rectangle. See `render/furniture.ts`. */
+export interface DecorDef {
+  kind: string;
+  tx: number;
+  ty: number;
+  w: number;
+  h: number;
+  /** The side its front points to. */
+  face?: 'n' | 'e' | 's' | 'w' | null;
+}
+
 export interface DoorDef {
   tiles: [number, number][];
   cost: number;
@@ -39,7 +50,8 @@ export interface DoorDef {
 /**
  * A map document as served by GET /api/maps/{id}, from the repo's maps/*.json. The server
  * (MapDoc.java / MapValidator.java) guarantees it is well formed and playable.
- * Tiles are one string per row: `.` outside, `_` floor, `#` wall, `W` window, `C` crate, `D` door.
+ * Tiles are one string per row: `.` outside, `_` floor, `#` wall, `W` window, `C` crate (tall
+ * furniture too), `D` door, `T` low furniture (shot over, not walked through).
  */
 export interface MapDoc {
   id: string;
@@ -60,6 +72,8 @@ export interface MapDoc {
   box: { tx: number; ty: number };
   /** Optional. With one, the box, perks and upgrade bench need the power on, and the buildings have lights. */
   power?: WallSpot | null;
+  /** Optional and only drawn: furniture sits on the `C`/`T` tiles that make it solid. */
+  decor?: DecorDef[] | null;
 }
 
 export interface MapData {
@@ -74,12 +88,13 @@ export interface MapData {
   box: { tx: number; ty: number };
   doors: DoorDef[];
   power: WallSpot | null;
+  decor: DecorDef[];
   startRoom: RoomId;
   playerStart: Vec2;
 }
 
 const TILE_CHARS: Record<string, TileType> = {
-  '.': Tile.Outside, _: Tile.Floor, '#': Tile.Wall, W: Tile.Window, C: Tile.Crate, D: Tile.Door,
+  '.': Tile.Outside, _: Tile.Floor, '#': Tile.Wall, W: Tile.Window, C: Tile.Crate, D: Tile.Door, T: Tile.Low,
 };
 
 /** Build the playable map from a document. Returns fresh objects, so each run can mutate its own copy. */
@@ -98,6 +113,7 @@ export function parseMap(doc: MapDoc): MapData {
     box: { ...doc.box },
     doors: doc.doors.map((d) => ({ ...d, tiles: d.tiles.map(([x, y]) => [x, y] as [number, number]) })),
     power: doc.power ? { ...doc.power } : null,
+    decor: (doc.decor ?? []).map((d) => ({ ...d })),
     startRoom: doc.startRoom,
     playerStart: { x: doc.playerStart.tx * TILE + TILE / 2, y: doc.playerStart.ty * TILE + TILE / 2 },
   };

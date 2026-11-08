@@ -7,7 +7,8 @@ import java.util.List;
  * {@code MapDoc} in {@code client/src/game/MapData.ts}. Coordinates are tiles.
  *
  * <p>Tile characters: {@code .} outside, {@code _} floor, {@code #} wall, {@code W} window,
- * {@code C} crate, {@code D} door.
+ * {@code C} crate (tall: blocks walking and bullets), {@code D} door, {@code T} low furniture (blocks
+ * walking only).
  */
 public record MapDoc(
         String id,
@@ -30,7 +31,12 @@ public record MapDoc(
          * Optional power switch. On a map with one, the box, perk machines and upgrade bench stay
          * dead (and the buildings dark) until a player throws it; without one they work from the start.
          */
-        WallSpot power) {
+        WallSpot power,
+        /**
+         * Optional and only drawn by the client: furniture, rugs and floor finishes. Furniture is
+         * drawn over the {@code C}/{@code T} tiles that make it solid; the sim never reads this.
+         */
+        List<Decor> decor) {
 
     public record TilePos(int tx, int ty) {}
 
@@ -45,4 +51,7 @@ public record MapDoc(
     public record WallBuyDef(int tx, int ty, int nx, int ny, String weapon) {}
 
     public record PerkSpot(int tx, int ty, int nx, int ny, String perk) {}
+
+    /** A w×h tile rectangle. {@code face} (n/e/s/w, optional) is the side its front points to. */
+    public record Decor(String kind, int tx, int ty, int w, int h, String face) {}
 }

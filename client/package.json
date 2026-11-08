@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "render-maps": "npx -y vite-node scripts/render-maps.ts"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.6"
   }

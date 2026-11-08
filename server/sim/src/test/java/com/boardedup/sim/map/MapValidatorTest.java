@@ -131,7 +131,27 @@ class MapValidatorTest {
     @Test
     void gridMustMatchItsSize() throws IOException {
         assertThat(houseWith(m -> m.put("width", 41))).anyMatch(e -> e.contains("must be width (41)"));
-        assertThat(houseWith(m -> setTile(m, 0, 0, 'Z'))).anyMatch(e -> e.contains("outside \"._#WCD\""));
+        assertThat(houseWith(m -> setTile(m, 0, 0, 'Z'))).anyMatch(e -> e.contains("outside \"._#WCDT\""));
+    }
+
+    @Test
+    void lowFurnitureDoesNotSplitARoom() throws IOException {
+        // A row of low furniture across the living room still leaves it one room.
+        assertThat(houseWith(m -> { for (int x = 5; x <= 21; x++) if (x != 17) setTile(m, x, 13, 'T'); })).isEmpty();
+    }
+
+    @Test
+    void decorIsOptionalButMustBeWellFormed() throws IOException {
+        assertThat(houseWith(m -> m.remove("decor"))).isEmpty();
+        List<String> errors = houseWith(m -> list(m, "decor").addAll(List.of(
+                new java.util.HashMap<>(Map.of("kind", "sofa", "tx", 44, "ty", 5, "w", 4, "h", 1)),
+                new java.util.HashMap<>(Map.of("kind", "bed", "tx", 10, "ty", 16, "w", 0, "h", 3)),
+                new java.util.HashMap<>(Map.of("kind", "rug", "tx", 10, "ty", 10, "w", 2, "h", 2, "face", "up")),
+                new java.util.HashMap<>(Map.of("kind", "no spaces", "tx", 10, "ty", 10, "w", 1, "h", 1)))));
+        assertThat(errors).anyMatch(e -> e.startsWith("decor sofa at 44,5") && e.contains("inside the map"));
+        assertThat(errors).anyMatch(e -> e.startsWith("decor bed at 10,16") && e.contains("w and h"));
+        assertThat(errors).anyMatch(e -> e.startsWith("decor rug at 10,10") && e.contains("face"));
+        assertThat(errors).anyMatch(e -> e.startsWith("decor: kind must match"));
     }
 
     @Test

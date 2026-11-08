@@ -38,16 +38,29 @@ public final class TileMap {
 
     /** Distance along a normalized ray before it hits a bullet-blocking tile (capped at {@code max}). */
     public double rayWall(double ox, double oy, double dx, double dy, double max) {
-        for (double d = 0; d < max; d += 4) {
-            if (blocksBullets(tileAt(ox + dx * d, oy + dy * d))) return d;
-        }
-        return max;
+        return ray(ox, oy, dx, dy, max, TileMap::blocksBullets);
     }
 
     public boolean hasLOS(double ax, double ay, double bx, double by) {
+        return clearLine(ax, ay, bx, by, TileMap::blocksBullets);
+    }
+
+    /** Like {@link #hasLOS}, but low furniture blocks it too: you can see over a table, not walk through it. */
+    public boolean hasWalkLine(double ax, double ay, double bx, double by) {
+        return clearLine(ax, ay, bx, by, t -> blocksBullets(t) || t == Tile.LOW);
+    }
+
+    private boolean clearLine(double ax, double ay, double bx, double by, IntPredicate blocks) {
         double d = Math.hypot(bx - ax, by - ay);
         if (d < 1) return true;
-        return rayWall(ax, ay, (bx - ax) / d, (by - ay) / d, d) >= d;
+        return ray(ax, ay, (bx - ax) / d, (by - ay) / d, d, blocks) >= d;
+    }
+
+    private double ray(double ox, double oy, double dx, double dy, double max, IntPredicate blocks) {
+        for (double d = 0; d < max; d += 4) {
+            if (blocks.test(tileAt(ox + dx * d, oy + dy * d))) return d;
+        }
+        return max;
     }
 
     /** Push a circle out of every solid tile it overlaps. */

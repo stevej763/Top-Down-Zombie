@@ -20,7 +20,7 @@ import java.util.Set;
  * rules; browsers send input and render snapshots. Not thread-safe: one thread steps a sim.
  */
 public final class GameSim {
-    private static final String TILE_CHARS = "._#WCD";
+    private static final String TILE_CHARS = "._#WCDT";
     /** Distance from the start tile's centre for every player after the first. */
     private static final double SPAWN_RING = 28;
 

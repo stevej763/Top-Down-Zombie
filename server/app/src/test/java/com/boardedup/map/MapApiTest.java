@@ -57,9 +57,11 @@ class MapApiTest {
 
         Res house = call("GET", "/api/maps/house", null, null);
         assertThat(house.status()).isEqualTo(200);
-        assertThat(house.body().get("width").asInt()).isEqualTo(40);
-        assertThat(house.body().get("tiles")).hasSize(30);
+        assertThat(house.body().get("width").asInt()).isEqualTo(46);
+        assertThat(house.body().get("tiles")).hasSize(32);
         assertThat(house.body().get("windows")).hasSize(8);
+        // Decor survives being stored and re-serialized, so the client gets its furniture.
+        assertThat(house.body().get("decor").findValuesAsString("kind")).contains("sofa", "bed", "car");
 
         assertThat(call("GET", "/api/maps/nope", null, null).status()).isEqualTo(404);
     }

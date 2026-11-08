@@ -123,7 +123,7 @@ public final class Zombie extends Body {
 
                 if (dp > reach - 4) {
                     double tx = p.x, ty = p.y;
-                    if (!(dp < DIRECT_CHASE_RANGE && game.map.hasLOS(x, y, p.x, p.y))) {
+                    if (!(dp < DIRECT_CHASE_RANGE && game.map.hasWalkLine(x, y, p.x, p.y))) {
                         Point next = game.flow.nextTarget(x, y);
                         if (next != null) {
                             tx = next.x();

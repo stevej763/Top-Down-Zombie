@@ -78,7 +78,7 @@ export function buildLevel(doc: MapDoc): Level {
 function lightAreas(map: TileMap): LightArea[] {
   const inRoom = (x: number, y: number) => {
     const t = map.get(x, y);
-    return t === Tile.Floor || t === Tile.Crate;
+    return t === Tile.Floor || t === Tile.Crate || t === Tile.Low;
   };
   const seen = new Uint8Array(map.w * map.h);
   const areas: LightArea[] = [];
