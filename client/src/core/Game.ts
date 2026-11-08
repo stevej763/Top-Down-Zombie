@@ -1,5 +1,8 @@
 import { sound } from '../audio/Sound';
-import { fetchMap, loadIdentity, type MapSummary } from '../net/api';
+import { loadIdentity, type MapSummary } from '../net/api';
+import type { Link } from '../net/Connection';
+import { NetGame } from '../net/NetGame';
+import type { GameResult, LobbyPlayer, NetEvent, ServerMessage } from '../net/protocol';
 import {
   drawCrosshair, drawInteractable, drawInteractableOverlay, drawPlayer, drawPlayerOverlay, drawPowerUps, drawWindow,
   drawZombie, renderMap,
@@ -8,18 +11,15 @@ import { Lighting } from '../render/lighting';
 import {
   PERK_VISUALS, POWERUP_VISUALS, TIER_HALO, WEAPON_FX, type PlayerFx, type ZombieFx,
 } from '../render/visuals';
-import { KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../sim/defs';
-import type { SimEvent } from '../sim/events';
-import { GameSim } from '../sim/GameSim';
-import type { PlayerInput } from '../sim/input';
-import type { MapDoc } from '../sim/MapData';
+import { KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../game/defs';
+import { NO_INPUT, type PlayerInput } from '../game/input';
+import type { MapDoc } from '../game/MapData';
 import { Leaderboard } from '../systems/HighScore';
 import { Particles } from '../systems/Particles';
 import { drawHUD } from '../ui/HUD';
 import { Menu } from '../ui/Menu';
 import { drawGameOver } from '../ui/Screens';
-import { buildLevel, type Level } from '../view/Level';
-import { LOCAL_PLAYER_ID, localView } from '../view/localView';
+import { buildLevel, restingWorld, type Level } from '../view/Level';
 import { heldWeapon, type PlayerView, type WorldView } from '../view/WorldView';
 import { Camera } from './Camera';
 import { Input } from './Input';
@@ -30,15 +30,33 @@ export const VIEW_H = 600;
 const STEP = 1 / 60;
 const HEARING_RANGE = 700;
 const BANNER_TIME = 3;
+const FEED_TIME = 4;
 const WHITE = '#ffffff';
+const DOWN_RED = '#e05040';
+/** Events this many ticks older than the newest in a batch (after a hidden tab, say) play no effects. */
+const STALE_EVENT_TICKS = 30;
+/** After a reconnect, the server says `welcome` if our seat is still there; past this, it's gone. */
+const RESUME_TIMEOUT = 3;
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover';
 
+/** The room we're in. `solo` is what we asked for; the server's `welcome` doesn't say. */
+export interface RoomInfo {
+  code: string;
+  mapId: string;
+  solo: boolean;
+  doc: MapDoc;
+}
+
+export type LobbyInfo = Extract<ServerMessage, { type: 'lobby' }>;
+export type GameOverInfo = Extract<ServerMessage, { type: 'gameOver' }>;
+
 /**
- * The browser client: owns the canvas, input, camera, particles, audio, menus and HUD, and
- * drives a `GameSim`. Everything gameplay happens in the sim; this turns the keyboard and
- * mouse into `PlayerInput` and the sim's events into sound and effects. Rendering, the HUD
- * and prompts read only `world` (a `WorldView`, rebuilt from the sim each tick) and `level`.
+ * The browser client: owns the canvas, input, camera, particles, audio, menus and HUD. The
+ * game itself runs on the server: this joins a room over `link`, sends one `PlayerInput` per
+ * tick, and draws `world`, which `NetGame` builds from snapshots (interpolated, with the local
+ * player predicted). Server events become sound and effects. Rendering, the HUD and prompts
+ * read only `world` and `level`.
  */
 export class Game {
   state: GameState = 'menu';
@@ -47,28 +65,42 @@ export class Game {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly lighting = new Lighting(VIEW_W, VIEW_H);
 
-  sim!: GameSim;
   /** The static map: tiles, window and fixture positions. */
   level!: Level;
-  /** What's drawn: the world as of the last tick. */
+  /** What's drawn. */
   world!: WorldView;
-  /** The local player's id in `world.players`. */
-  you = LOCAL_PLAYER_ID;
+  /** The local player's id in `world.players` (the server's id once in a room). */
+  you = 0;
+  /** The map New Game creates a room on. */
+  mapId: string;
+  room: RoomInfo | null = null;
+  lobby: LobbyInfo | null = null;
+  /** The finished game, for the game-over screen. */
+  result: GameOverInfo | null = null;
+  private net: NetGame | null = null;
+  /** What the last create/join asked for, so `welcome` knows if it's solo. */
+  private asked: 'solo' | 'coop' | 'join' | null = null;
+  /** `link.opens` when the room last welcomed us; a higher count means we reconnected. */
+  private roomOpens = 0;
+  private resumeBy = 0;
+  /** Solo "play again" was sent; ignore more presses until the server starts it. */
+  private restarting = false;
+
   private mapCanvas!: HTMLCanvasElement;
   particles!: Particles;
   camera!: Camera;
   private playerFx = new Map<number, PlayerFx>();
   private zombieFx = new Map<number, ZombieFx>();
-  /** The finished game, for the game-over screen. */
-  result = { round: 0, kills: 0, points: 0 };
 
   time = 0;
   gameOverTimer = 0;
   readonly scores: Leaderboard;
-  /** Big centre-screen callout (power-ups, Second Wind). */
+  /** Big centre-screen callout (power-ups, Second Wind, going down). */
   callout = { text: '', color: WHITE, timer: 0 };
   /** Round start/end banner. */
   banner = { text: '', timer: 0 };
+  /** Small lines about teammates ("Sam is down!"), newest last. */
+  feed: { text: string; color: string; timer: number }[] = [];
   /** "Now playing" toast. */
   nowPlaying = { title: '', timer: 0 };
   /** White flash overlay (nuke). */
@@ -78,8 +110,9 @@ export class Game {
   private last = 0;
   private acc = 0;
 
-  /** `maps` is the server's map list; `mapDoc` is the map New Game plays (changed by `loadMap`). */
-  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], public mapDoc: MapDoc) {
+  /** `maps` is the server's map list; `mapDoc` is drawn behind the title menu. */
+  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], private mapDoc: MapDoc, readonly link: Link) {
+    this.mapId = mapDoc.id;
     this.scores = new Leaderboard(mapDoc.id);
     this.ctx = canvas.getContext('2d')!;
     this.input = new Input(canvas, VIEW_W, VIEW_H);
@@ -92,43 +125,93 @@ export class Game {
     void this.scores.refresh();
   }
 
-  /** Fetch a map and make it the one New Game plays. */
-  async loadMap(id: string): Promise<void> {
-    if (id !== this.mapDoc.id) this.mapDoc = await fetchMap(id);
+  // ---------------------------------------------------------------- rooms
+
+  /** The map New Game plays. */
+  selectMap(id: string): void {
+    this.mapId = id;
     this.scores.show(id);
   }
 
-  newGame(): void {
-    this.sim = new GameSim(this.mapDoc, (Math.random() * 2 ** 32) >>> 0);
-    this.level = buildLevel(this.mapDoc);
-    this.world = localView(this.sim, loadIdentity()?.name ?? '');
-    const map = this.level.data.map;
+  createRoom(solo: boolean): void {
+    this.asked = solo ? 'solo' : 'coop';
+    this.link.connect();
+    this.link.send({ type: 'create', mapId: this.mapId, solo });
+  }
+
+  joinRoom(code: string): void {
+    this.asked = 'join';
+    this.link.connect();
+    this.link.send({ type: 'join', code });
+  }
+
+  setReady(ready: boolean): void {
+    this.link.send({ type: 'ready', ready });
+  }
+
+  startGame(): void {
+    this.link.send({ type: 'start' });
+  }
+
+  get isHost(): boolean {
+    return this.lobby?.ownerId === this.you;
+  }
+
+  get lobbyMe(): LobbyPlayer | undefined {
+    return this.lobby?.players.find((p) => p.id === this.you);
+  }
+
+  /** Leave the room (if any) and drop the socket. */
+  leaveRoom(): void {
+    if (this.room || this.asked) this.link.send({ type: 'leave' });
+    this.link.close();
+    this.room = null;
+    this.lobby = null;
+    this.net = null;
+    this.asked = null;
+    this.resumeBy = 0;
+  }
+
+  /** Back to the title menu, out of any room, with the default map resting behind it. */
+  toMenu(notice = ''): void {
+    this.leaveRoom();
+    this.you = 0;
+    this.setLevel(buildLevel(this.mapDoc));
+    this.state = 'menu';
+    this.menu.open('title');
+    if (notice) this.menu.fail(notice);
+  }
+
+  private setLevel(level: Level): void {
+    this.level = level;
+    const map = level.data.map;
+    this.world = restingWorld(level, this.you, loadIdentity()?.name ?? '');
     this.mapCanvas = renderMap(map);
     this.particles = new Particles(map.pxW, map.pxH);
     this.camera = new Camera(VIEW_W, VIEW_H, map.pxW, map.pxH);
     this.camera.snap(this.me.x, this.me.y);
     this.playerFx.clear();
     this.zombieFx.clear();
-    this.gameOverTimer = 0;
-    this.scores.lastRank = -1;
     this.callout.timer = 0;
     this.banner.timer = 0;
+    this.feed = [];
     this.screenFlash = 0;
-    this.state = 'playing';
-  }
-
-  /** Back to the title menu, with a fresh (frozen) world behind it. */
-  toMenu(): void {
-    const lastRank = this.scores.lastRank;
-    this.newGame();
-    this.scores.lastRank = lastRank;
-    this.state = 'menu';
-    this.menu.open('title');
   }
 
   /** The local player. */
   get me(): PlayerView {
     return this.world.players.find((p) => p.id === this.you) ?? this.world.players[0];
+  }
+
+  /** Who the camera follows while you're dead: the first teammate still up, if any. */
+  get spectating(): PlayerView | null {
+    if (this.me.state !== 'dead') return null;
+    return this.world.players.find((p) => p.state === 'alive' && p.id !== this.you) ?? null;
+  }
+
+  /** Where the camera and your ears are. */
+  private get focus(): PlayerView {
+    return this.spectating ?? this.me;
   }
 
   playerFxOf(id: number): PlayerFx {
@@ -169,26 +252,150 @@ export class Game {
     requestAnimationFrame(this.frame);
   };
 
+  // ---------------------------------------------------------------- network
+
+  /** Handle everything the server sent since the last tick. */
+  private pollNet(): void {
+    const msgs = this.link.drain();
+    let newest = -Infinity;
+    for (const m of msgs) if (m.type === 'events') newest = Math.max(newest, m.tick);
+    for (const m of msgs) this.handle(m, m.type !== 'events' || m.tick >= newest - STALE_EVENT_TICKS);
+
+    if (this.room && this.link.status === 'open' && this.link.opens > this.roomOpens && this.resumeBy === 0) {
+      this.resumeBy = this.time + RESUME_TIMEOUT;
+    }
+    if (this.resumeBy > 0 && this.time > this.resumeBy) this.toMenu('Lost the connection to the game');
+  }
+
+  /** `fresh` is false for events too old to be worth playing. */
+  private handle(m: ServerMessage, fresh: boolean): void {
+    switch (m.type) {
+      case 'welcome':
+        this.welcome(m);
+        break;
+      case 'lobby':
+        this.lobby = m;
+        // Back in the lobby without a gameOver: the game crashed, or ended while we were away.
+        if (m.state === 'lobby' && (this.state === 'playing' || this.state === 'paused')) {
+          if (this.room?.solo) this.toMenu('The game ended');
+          else this.toLobby();
+        }
+        break;
+      case 'start':
+        this.gameStarted(m.tick);
+        break;
+      case 'snapshot':
+        if (this.state === 'playing' || this.state === 'paused') this.net?.snapshot(m, this.time);
+        break;
+      case 'events':
+        if (fresh && (this.state === 'playing' || this.state === 'paused')) for (const e of m.events) this.onEvent(e);
+        break;
+      case 'gameOver':
+        this.gameOver(m);
+        break;
+      case 'error':
+        this.restarting = false;
+        if (this.state === 'menu') this.menu.fail(m.message);
+        else this.addFeed(m.message, DOWN_RED);
+        // A create or join that failed leaves us in no room.
+        if (!this.room) this.asked = null;
+        break;
+      case 'pong':
+        break;
+    }
+  }
+
+  private welcome(m: Extract<ServerMessage, { type: 'welcome' }>): void {
+    this.roomOpens = this.link.opens;
+    this.resumeBy = 0;
+    this.you = m.you.playerId;
+    // The same room again: a reconnect. The server follows with `start` if the game is still on.
+    if (this.room?.code === m.room.code) return;
+    this.room = { code: m.room.code, mapId: m.room.mapId, solo: this.asked === 'solo', doc: m.map };
+    this.lobby = null;
+    this.setLevel(buildLevel(m.map));
+    this.scores.show(m.room.mapId);
+    this.menu.done();
+    if (!this.room.solo) this.toLobby();
+  }
+
+  private toLobby(): void {
+    this.state = 'menu';
+    this.menu.open('title');
+    this.menu.showLobby();
+  }
+
+  private gameStarted(tick: number): void {
+    const room = this.room;
+    if (!room) return;
+    const running = this.state === 'playing' || this.state === 'paused';
+    if (running && this.net && tick > 0) {
+      this.net.restart(true);
+      return;
+    }
+    // A fresh level each game: the last one's doors were opened in its tile map.
+    this.setLevel(buildLevel(room.doc));
+    this.net = new NetGame(this.level, this.you);
+    this.restarting = false;
+    this.result = null;
+    this.gameOverTimer = 0;
+    this.state = 'playing';
+    this.menu.done();
+  }
+
+  private gameOver(m: GameOverInfo): void {
+    this.state = 'gameover';
+    this.gameOverTimer = 0;
+    this.result = m;
+    sound.gameOver();
+    const mine = m.players.find((p) => p.id === this.you);
+    if (this.room) this.scores.show(this.room.mapId);
+    this.scores.lastRank = mine?.rank ?? -1;
+  }
+
+  /** Solo: a new game in the same room. Co-op: back to the lobby to ready up again. */
+  private playAgain(): void {
+    if (!this.room) {
+      this.toMenu();
+    } else if (this.room.solo) {
+      if (!this.restarting) this.startGame();
+      this.restarting = true;
+    } else {
+      this.toLobby();
+    }
+  }
+
+  get myResult(): GameResult | undefined {
+    return this.result?.players.find((p) => p.id === this.you);
+  }
+
   // ---------------------------------------------------------------- update
 
-  private update(dt: number): void {
+  /** @internal Public for the headless smoke run; the frame loop calls it. */
+  update(dt: number): void {
     this.time += dt;
     const inp = this.input;
     if (inp.wasPressed('KeyM')) sound.toggleMute();
     sound.startMusic();
     // Keep the music audible on the audio page so the slider can be judged.
     sound.setMusicPaused(this.state === 'paused' && this.menu.page !== 'audio');
+    this.pollNet();
     switch (this.state) {
       case 'menu':
+        this.menu.update(this);
+        break;
       case 'paused':
-        if (this.state === 'paused' && inp.wasPressed('KeyP')) this.resume();
+        // Online, the world keeps going behind the pause menu; you just stand still.
+        this.runNet(dt, { ...NO_INPUT, aim: this.me.aim });
+        if (this.state !== 'paused') break;
+        if (inp.wasPressed('KeyP')) this.resume();
         else this.menu.update(this);
         break;
       case 'gameover':
         this.gameOverTimer += dt;
         this.updateEffects(dt);
         if (this.gameOverTimer > 1.5) {
-          if (inp.wasPressed('Enter') || inp.mousePressed) this.newGame();
+          if (inp.wasPressed('Enter') || inp.mousePressed) this.playAgain();
           else if (inp.wasPressed('Escape')) this.toMenu();
         }
         break;
@@ -197,14 +404,20 @@ export class Game {
           this.pause();
           break;
         }
-        this.sim.step(dt, this.readInput());
-        this.world = localView(this.sim, this.me.name);
-        for (const e of this.sim.events) this.onEvent(e);
-        this.sim.events.length = 0;
-        this.updateEffects(dt);
-        this.updateGroans(dt);
+        this.runNet(dt, this.readInput());
         break;
     }
+  }
+
+  /** Send this tick's input (predicting it locally), then rebuild the world to draw. */
+  private runNet(dt: number, input: PlayerInput): void {
+    const net = this.net;
+    if (!net) return;
+    // While the socket is down the server isn't hearing us, so don't predict moves it won't make.
+    if (this.link.status === 'open') this.link.send({ type: 'input', inputs: [net.tick(input, dt)] });
+    this.world = net.view(this.time) ?? this.world;
+    this.updateEffects(dt);
+    this.updateGroans(dt);
   }
 
   private readInput(): PlayerInput {
@@ -240,9 +453,12 @@ export class Game {
       zf.wobble += dt * (z.runner ? 14 : 6);
     }
     this.particles.update(dt);
-    this.camera.follow(this.me.x, this.me.y, dt);
+    const f = this.focus;
+    this.camera.follow(f.x, f.y, dt);
     this.callout.timer = Math.max(0, this.callout.timer - dt);
     this.banner.timer = Math.max(0, this.banner.timer - dt);
+    for (const line of this.feed) line.timer -= dt;
+    this.feed = this.feed.filter((l) => l.timer > 0);
     this.nowPlaying.timer = Math.max(0, this.nowPlaying.timer - dt);
     this.screenFlash = Math.max(0, this.screenFlash - dt * 1.5);
   }
@@ -266,10 +482,25 @@ export class Game {
     this.groanTimer = rand(0.8, 3) / Math.min(3, 1 + zs.length / 8);
   }
 
-  /** 0..1 loudness for a sound at a world position, by distance from the player. */
+  /** 0..1 loudness for a sound at a world position, by distance from where you're watching. */
   private volumeAt(x: number, y: number): number {
-    const p = this.me;
+    const p = this.focus;
     return Math.max(0, 1 - dist(x, y, p.x, p.y) / HEARING_RANGE);
+  }
+
+  private playerById(id: number): PlayerView | undefined {
+    return this.world.players.find((p) => p.id === id);
+  }
+
+  private nameOf(id: number): string {
+    return this.playerById(id)?.name ?? this.lobby?.players.find((p) => p.id === id)?.name ?? 'Someone';
+  }
+
+  /** Loudness of a sound made by a player: full for your own, by distance for teammates'. */
+  private volumeOf(id: number): number {
+    if (id === this.you) return 1;
+    const p = this.playerById(id);
+    return p ? this.volumeAt(p.x, p.y) : 0;
   }
 
   private showCallout(text: string, color: string): void {
@@ -280,23 +511,30 @@ export class Game {
     this.banner = { text, timer: BANNER_TIME };
   }
 
+  private addFeed(text: string, color = WHITE): void {
+    this.feed.push({ text, color, timer: FEED_TIME });
+    if (this.feed.length > 4) this.feed.shift();
+  }
+
   /** Floating text above the player. */
   private playerText(text: string, color: string): void {
     const p = this.me;
     this.particles.text(text, p.x, p.y - 20, color);
   }
 
-  private onEvent(e: SimEvent): void {
+  /** Purchases, points and screen shake are only shown to whoever they belong to. */
+  private onEvent(e: NetEvent): void {
+    const mine = 'player' in e && e.player === this.you;
     const pts = (points: number, x: number, y: number) => {
-      if (points > 0) this.particles.text(`+${points}`, x, y);
+      if (mine && points > 0) this.particles.text(`+${points}`, x, y);
     };
     switch (e.type) {
       case 'shot': {
         const wfx = WEAPON_FX[e.weapon];
         if (wfx.casing) this.particles.casing(e.x + Math.cos(e.aim) * 12, e.y + Math.sin(e.aim) * 12, e.aim, wfx.casing);
-        this.playerFxOf(this.you).flash = 0.05;
-        this.camera.addShake(wfx.shake);
-        sound.shot(e.weapon);
+        this.playerFxOf(e.player).flash = 0.05;
+        if (mine) this.camera.addShake(wfx.shake);
+        sound.shot(e.weapon, mine ? 1 : this.volumeAt(e.x, e.y));
         break;
       }
       case 'tracer': {
@@ -311,16 +549,18 @@ export class Game {
         if (e.hitWall) this.particles.impact(e.x2 - dx * 1.5, e.y2 - dy * 1.5, Math.atan2(dy, dx) + Math.PI, wfx.tracer);
         break;
       }
-      case 'explosion':
+      case 'explosion': {
+        const vol = this.volumeAt(e.x, e.y);
         this.particles.explosion(e.x, e.y, '#8ad8ff');
         this.particles.ring(e.x, e.y, e.radius, '120, 220, 255');
-        this.camera.addShake(3);
-        sound.explosion(0.4);
+        this.camera.addShake(3 * vol);
+        sound.explosion(0.4 * vol);
         break;
+      }
       case 'zombieHit': {
         this.fxOf(e.zombie).hitFlash = 0.08;
         this.particles.blood(e.x, e.y, e.angle, 6);
-        if (e.points > 0) {
+        if (mine && e.points > 0) {
           const z = this.world.zombies.find((z) => z.id === e.zombie);
           pts(e.points, z?.x ?? e.x, (z?.y ?? e.y) - 16);
           sound.hit();
@@ -334,32 +574,62 @@ export class Game {
         this.zombieFx.delete(e.zombie);
         break;
       case 'knife':
-        this.playerFxOf(this.you).knifeSwing = KNIFE.swing;
-        sound.knife(e.hit);
-        if (e.hit) this.camera.addShake(2);
+        this.playerFxOf(e.player).knifeSwing = KNIFE.swing;
+        sound.knife(e.hit, this.volumeOf(e.player));
+        if (mine && e.hit) this.camera.addShake(2);
         break;
       case 'reload':
-        sound.reload();
+        if (mine) sound.reload();
         break;
       case 'playerHurt':
-        this.playerFxOf(this.you).hurtFlash = 1;
-        this.camera.addShake(7);
+        this.playerFxOf(e.player).hurtFlash = 1;
         this.particles.blood(e.x, e.y, rand(0, TAU), 8);
-        sound.hurt();
+        if (mine) {
+          this.camera.addShake(7);
+          sound.hurt();
+        }
         break;
       case 'secondWind':
-        this.showCallout('SECOND WIND', PERK_VISUALS.secondWind.color);
-        sound.revive();
+        if (mine) this.showCallout('SECOND WIND', PERK_VISUALS.secondWind.color);
+        else this.addFeed(`${this.nameOf(e.player)} got a Second Wind`, PERK_VISUALS.secondWind.color);
+        sound.revive(this.volumeOf(e.player));
+        break;
+      case 'playerDowned':
+        if (mine) {
+          this.showCallout('YOU ARE DOWN', DOWN_RED);
+          this.camera.addShake(10);
+          sound.hurt();
+        } else {
+          this.addFeed(`${this.nameOf(e.player)} is down!`, DOWN_RED);
+          sound.denied();
+        }
+        break;
+      case 'playerRevived':
+        if (mine) this.showCallout('REVIVED', WHITE);
+        else this.addFeed(e.by === this.you ? `You revived ${this.nameOf(e.player)}` : `${this.nameOf(e.by)} revived ${this.nameOf(e.player)}`);
+        sound.revive(Math.max(this.volumeOf(e.player), this.volumeOf(e.by)));
+        break;
+      case 'playerDied':
+        if (mine) this.showCallout('YOU BLED OUT', DOWN_RED);
+        else this.addFeed(`${this.nameOf(e.player)} bled out`, DOWN_RED);
+        break;
+      case 'playerRespawned':
+        if (mine) {
+          this.camera.snap(e.x, e.y);
+          this.playerText('Back in', WHITE);
+        } else {
+          this.addFeed(`${this.nameOf(e.player)} is back`);
+        }
         break;
       case 'gameOver':
-        this.gameOver();
+        // The room follows with a `gameOver` message carrying the results.
         break;
       case 'plankTorn':
         this.particles.debris(e.x, e.y);
         sound.plankTear(this.volumeAt(e.x, e.y));
         break;
       case 'plankPlaced':
-        sound.plankPlace();
+        sound.plankPlace(mine ? 1 : this.volumeAt(e.x, e.y));
         pts(e.points, e.x, e.y - 10);
         break;
       case 'doorOpened':
@@ -367,30 +637,37 @@ export class Game {
         sound.door();
         break;
       case 'denied':
+        if (!mine) break;
         this.playerText('Not enough points', '#d05050');
         sound.denied();
         break;
       case 'weaponGiven':
+        if (!mine) break;
         this.playerText(weaponName(e.weapon, e.tier), WHITE);
         sound.buy();
         break;
       case 'ammoBought':
+        if (!mine) break;
         this.playerText('Ammo', WHITE);
         sound.buy();
         break;
       case 'perkBought':
+        if (!mine) break;
         this.playerText(PERKS[e.perk].name, PERK_VISUALS[e.perk].color);
         sound.perk();
         break;
       case 'armourBought':
+        if (!mine) break;
         this.playerText(`Armour ${e.level}`, '#7aa8ff');
         sound.armour();
         break;
       case 'upgraded':
+        if (!mine) break;
         this.playerText(weaponName(e.weapon, e.tier), '#c890ff');
         sound.upgrade();
         break;
       case 'powerUp':
+        // Shared: everyone gets the callout.
         this.showCallout(POWERUPS[e.id].name.toUpperCase(), POWERUP_VISUALS[e.id].color);
         sound.powerUp();
         if (e.id === 'nuke') {
@@ -414,14 +691,6 @@ export class Game {
         sound.boxReveal();
         break;
     }
-  }
-
-  private gameOver(): void {
-    this.state = 'gameover';
-    this.gameOverTimer = 0;
-    sound.gameOver();
-    this.result = { round: Math.max(0, this.sim.rounds.round - 1), kills: this.sim.kills, points: this.sim.economy.earned };
-    if (this.result.round > 0 || this.result.kills > 0) void this.scores.record(this.mapDoc.id, this.result);
   }
 
   // ---------------------------------------------------------------- render

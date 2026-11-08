@@ -1,6 +1,6 @@
 # Phase 4 plan: co-op multiplayer with an authoritative Java server
 
-Read CLAUDE.md first, especially **Two sims**, **Server** and **Backend roadmap**. This doc is the plan for the last roadmap phase. Tick off milestones here as they land, and fold the lasting facts into CLAUDE.md at the end.
+Read CLAUDE.md first, especially **Netcode**, **Server** and **Backend roadmap**. (Phase 4 is complete; this doc is now a record.) This doc is the plan for the last roadmap phase. Tick off milestones here as they land, and fold the lasting facts into CLAUDE.md at the end.
 
 ## Goal
 Two to four players defend the same map together. The Java server (`server/sim` inside `server/app`) runs the only simulation. Browsers send input, render server snapshots, predict their own movement, and play effects from server events. Solo play becomes a one-player room on the server. When this phase is done, the TS gameplay sim is deleted, and the server records scores itself, so the leaderboard can't be faked.
@@ -174,7 +174,20 @@ Change only the client, so rendering stops depending on sim classes. The TS sim 
 - **Draw every player:** each player gets their own flashlight cone and glow (`lighting.ts`). Remote players use a different body colour, a name tag, and a downed pose (lying, red ring with the bleed-out arc). `PlayerFx` becomes per-player (`Map<playerId, PlayerFx>`).
 - **Verify:** `npm run build`, the headless client smoke run (see CLAUDE.md), and a manual play-through. Gameplay is untouched, so the parity test still passes.
 
-### M4: Networked client
+### M4: Networked client ✅ done
+**As built** (details the plan left open):
+- Every game goes through the server, solo included (a solo room starts on `create`). `core/Game.ts` no longer imports the TS sim; `localView` is unused and goes in M5. Behind the menus, and until the first snapshot, the world is `restingWorld(level)` (one player on the start tile, full planks, doors shut).
+- `Link` (interface) / `Connection`: messages go to an inbox that `Game.pollNet()` drains at the start of each tick. Lobby commands sent while connecting are queued; inputs and pings aren't. A handshake that never opens makes the next attempt re-check the token (`ensureRegistered(true)`; `setName` re-registers on a 401). A generation counter stops a late attempt from opening a second socket after `close()`. Leaving a room closes the socket.
+- Inputs are only sent (and predicted) while the socket is open. Seqs restart on `start` with tick 0; a `start` with tick > 0 while already playing is a resume (pending inputs and the snapshot buffer are dropped, seqs carry on).
+- Interpolation runs on the server's tick clock: `offset ≈ tick/60 − localTime`, smoothed (5% per snapshot), reset when a sample is 0.5 s off. Remote players and zombies come from the later of the two bracketing snapshots, position and angle lerped from the earlier; round, power-ups, windows, interactables and the local player's stats come from the newest.
+- After a reconnect, if no `welcome` arrives within 3 s the seat is gone (grace expired) and the client returns to the title. A `lobby` with `state: "lobby"` while still playing (the game crashed, or ended while we were away) goes back to the lobby page, or the title for solo. Events more than 30 ticks older than the newest in a drained batch (a hidden tab) play no effects.
+- Effects: purchases, "Not enough points", points text, hit sounds, hurt shake and reload sound are only for `e.player === you`. Muzzle flash and knife swing play for whoever acted; their shots, knife, plank and revive sounds fade with distance (`volumeAt`, from the spectated player when dead). Power-ups are a callout for everyone. Teammate events (`playerDowned`/`Revived`/`Died`/`Respawned`, Second Wind, server errors mid-game) go to a small `feed` under the power-up timers. The muzzle flash still waits for the server's `shot`.
+- HUD: room code under the round status (co-op), teammates panel top right (body colour, name, points, hp bar or DOWN/DEAD, AWAY from the lobby's `connected`), REVIVING bar (in the reload bar's place), "YOU ARE DOWN" with the bleed-out (or being-revived) bar, "SPECTATING <name>" while dead (the camera follows the first teammate still up), blinking "RECONNECTING…".
+- Game over: "YOU DIED" (solo) or "OVERRUN" (co-op), rounds survived, everyone's kills and points, your rank (NEW RECORD / #n). Enter: solo sends `start` in the same room; co-op returns to the lobby page. Esc leaves.
+- `Leaderboard` only shows server tables (no localStorage scores; `record` and `submitScore` are gone). The table marks co-op rows `(nP)`.
+- `PLAYER_SPEED`, `BASE_HP` and `MAX_PLANKS` joined the Java-constant mirrors in `defs.ts`. `sound.shot/knife/plankPlace/revive` take a volume.
+- **Verified:** `npm run build`. Headless runs of the real client (`Game` + `Connection` + `NetGame`, canvas stubbed, bot input) against `docker compose up`: solo to game over (≈20 snapshots/s, max correction 7 px, the score saved and ranked); a two-process co-op game (separate points, one shared world) where the guest dropped its socket mid-game and resumed (second `welcome`, `start` at tick 1336); solo with `DEBUG_LATENCY_MS=100` (RTT ≈ 205 ms, max correction 1.2 px, prediction ~25 px ahead of the server). A fake-`Link` run covered the guest lobby page, prediction, downed (server position, callout), teammate death feed, spectating, the lost-seat timeout and solo game over → play again. **Not yet checked in a real browser** (no browser tools in that session): the two-tab test, Chrome throttling and how prediction feels by hand are still to do.
+
 - **`net/Connection.ts`:**
   - WebSocket to `${location.origin.replace('http', 'ws')}/ws?token=…`. Use `BASE_URL`, and register first via `net/api.ts` if there's no token.
   - JSON parse, typed message dispatch, ping every 2 s, RTT smoothing, reconnect with backoff (resumes within the 30 s grace).
@@ -207,7 +220,15 @@ Change only the client, so rendering stops depending on sim classes. The TS sim 
   - Chrome network throttling plus `debug.latency-ms=100`;
   - solo still plays like before.
 
-### M5: Retire the TS sim and finish
+### M5: Retire the TS sim and finish ✅ done
+**As built:**
+- Deleted the TS gameplay sim (`GameSim`, `Player`, `Zombie`, `RoundManager`, `Pathfinding`, `aimAssist`, `Economy`, `PowerUps`, `Interactables`, `Weapon`, `Barricade`, `Rng`, `events`), `view/localView.ts`, `client/scripts/parity.ts`, the `parity` npm script and the `vite-node` dev dependency. `sim/Player.ts` went too: `net/PlayerMotion.ts` already covers prediction.
+- What remained moved from `client/src/sim/` to `client/src/game/` (`defs.ts`, `input.ts`, `MapData.ts`, `TileMap.ts`). `defs.ts` lost the exports only the sim used (`BOX_POOL`, `PERK_EFFECTS`, `STARTING_POINTS`, `REBUILD_CAP`, `POINTS`, `ARMOUR_ABSORB`, `POWERUP_IDS`, `POWERUP_TUNING`).
+- `parity.txt` is frozen (header now says it was recorded from the TS sim). `SimParityTest` regenerates it from Java when `REGENERATE_PARITY` is set; checked that this reproduces the current file exactly. Java comments that said "port of client/src/sim/…" now describe the class or point at `client/src/game/`.
+- `POST /api/scores` was already gone (M2).
+- CLAUDE.md: **Two sims** replaced by **Netcode**; architecture tables, conventions, testing notes, history (11) and roadmap updated.
+- **Verified:** `npm run build`; all Java tests (`./gradlew test`, including `SimParityTest`); `docker compose up -d --build`, then a two-client co-op game (Node WebSockets) through nginx on `:8551`: lobby, join, ready, start, 20 snapshots/s to each client, overrun, and both scores in `GET /api/scores?map=house` with `partySize: 2`. **Still not checked in a real browser:** the two-tab game.
+
 - **Delete the TS gameplay sim:**
   - `client/src/sim/GameSim.ts`, `Zombie.ts`, `RoundManager.ts`, `Pathfinding.ts`, `aimAssist.ts`, `Economy.ts`, `PowerUps.ts`, `Interactables.ts`, `Weapon.ts` (if the HUD no longer needs it), `Barricade.ts`, `Rng.ts`, `events.ts` (replaced by `net/protocol.ts`);
   - the `localView` adapter;

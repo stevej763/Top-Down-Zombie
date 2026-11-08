@@ -5,15 +5,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * Replays the reference run recorded from the TS sim (client/scripts/parity.ts) and checks the
- * Java sim produces the same states. If this fails after a gameplay change, either the change
- * wasn't made in both sims, or the reference needs regenerating with {@code npm run parity}.
+ * A regression baseline: replays a recorded bot run (seed 42, two minutes per map) and requires the
+ * same states to 6 decimals. parity.txt was recorded from the TypeScript sim, which the Java sim
+ * matched exactly; the TS sim is gone, so it is now frozen. A failure names the first state that
+ * drifted. If gameplay changed on purpose, regenerate it from Java with
+ * {@code REGENERATE_PARITY=1 ./gradlew :sim:test --tests SimParityTest} and review the diff.
  */
 class SimParityTest {
     private static final double DT = 1.0 / 60;
@@ -22,7 +26,7 @@ class SimParityTest {
     private static final int EVERY = 300;
 
     @Test
-    void javaSimMatchesTheTypeScriptSim() throws IOException {
+    void matchesTheRecordedRun() throws IOException {
         List<String> expected;
         try (InputStream in = getClass().getResourceAsStream("/parity.txt")) {
             expected = new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().filter(l -> !l.startsWith("#")).toList();
@@ -37,6 +41,12 @@ class SimParityTest {
             }
             actual.add(map + " end " + line(s));
         }
+        if (System.getenv("REGENERATE_PARITY") != null) {
+            // Gradle runs tests from the project dir (server/sim).
+            Files.writeString(Path.of("src/test/resources/parity.txt"),
+                    "# Recorded by SimParityTest (REGENERATE_PARITY=1). seed=" + SEED + "\n" + String.join("\n", actual) + "\n");
+            return;
+        }
         // Line by line, so a failure points at the first state that drifted.
         for (int i = 0; i < Math.min(expected.size(), actual.size()); i++) {
             assertThat(actual.get(i)).as("state %d", i).isEqualTo(expected.get(i));
@@ -44,7 +54,6 @@ class SimParityTest {
         assertThat(actual).hasSameSizeAs(expected);
     }
 
-    /** Must match the format in client/scripts/parity.ts. */
     private static String line(GameSim s) {
         Player p = s.players.getFirst();
         return "r%d k%d p%d hp%.6f x%.6f y%.6f z=%s".formatted(s.rounds.round, s.kills, p.economy.points, p.hp, p.x, p.y,

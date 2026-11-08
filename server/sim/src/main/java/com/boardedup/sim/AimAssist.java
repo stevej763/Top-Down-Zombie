@@ -1,6 +1,6 @@
 package com.boardedup.sim;
 
-/** Port of client/src/sim/aimAssist.ts. */
+/** Nudges shots that would just miss onto a zombie. */
 public final class AimAssist {
     /** Half-angle of the assist cone. Set to 0 to disable aim assist. */
     public static final double CONE = Math.toRadians(8);

@@ -1,6 +1,6 @@
 package com.boardedup.sim;
 
-/** Port of client/src/core/math.ts. */
+/** Vector and angle helpers, matching client/src/core/math.ts. */
 public final class SimMath {
     public static final double TAU = Math.PI * 2;
 

@@ -1,6 +1,6 @@
 import {
   ammoCost, ARMOUR_LEVELS, BOX_COST, magSize, MAX_TIER, PERKS, repairCost, reserveSize, UPGRADE, WEAPONS, weaponName,
-} from '../sim/defs';
+} from '../game/defs';
 import type { Fixture, Level } from '../view/Level';
 import { heldWeapon, type InteractableView, type PlayerView, type WorldView } from '../view/WorldView';
 

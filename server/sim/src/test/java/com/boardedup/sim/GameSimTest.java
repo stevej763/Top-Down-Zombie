@@ -28,7 +28,7 @@ class GameSimTest {
         return TestMaps.load(id);
     }
 
-    /** A one-player sim, like the TS sim. */
+    /** A one-player sim. */
     static GameSim solo(String map, long seed) {
         GameSim s = new GameSim(doc(map), seed);
         s.addPlayer(1, "solo");
@@ -147,7 +147,7 @@ class GameSimTest {
             s.step(DT, bot(s));
             s.events.clear();
         }
-        // The bot is weak (the TS original averages about round 3), so this only catches a broken sim.
+        // The bot is weak (it averaged about round 3 on the original code), so this only catches a broken sim.
         assertThat(s.rounds.round).isGreaterThanOrEqualTo(2);
         assertThat(s.kills).isGreaterThanOrEqualTo(6);
     }

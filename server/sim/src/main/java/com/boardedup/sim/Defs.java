@@ -11,7 +11,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Gameplay tuning from shared/defs/*.json (copied onto the classpath under {@code defs/}).
- * The client reads the same files in client/src/sim/defs.ts. Ids are the JSON keys.
+ * The client reads the same files in client/src/game/defs.ts (for names, prices and drawing). Ids are the JSON keys.
  */
 public final class Defs {
     public record WeaponDef(

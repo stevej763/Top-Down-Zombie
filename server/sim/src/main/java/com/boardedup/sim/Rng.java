@@ -3,8 +3,8 @@ package com.boardedup.sim;
 import java.util.List;
 
 /**
- * Seeded PRNG (mulberry32), the same algorithm as client/src/sim/Rng.ts. Java int multiplication
- * wraps like Math.imul, so a seed gives the same sequence in both.
+ * Seeded PRNG (mulberry32). Ported from the retired TS sim; Java int multiplication wraps like
+ * Math.imul, so a seed still gives the sequence {@code RngTest} pins.
  */
 public final class Rng {
     private int s;

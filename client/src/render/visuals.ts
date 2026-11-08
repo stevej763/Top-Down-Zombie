@@ -1,4 +1,4 @@
-import type { PerkId, PowerUpId, WeaponId } from '../sim/defs';
+import type { PerkId, PowerUpId, WeaponId } from '../game/defs';
 import type { Fixture } from '../view/Level';
 
 /** Visual-only tuning: everything here is cosmetic, so it stays out of shared/defs. */

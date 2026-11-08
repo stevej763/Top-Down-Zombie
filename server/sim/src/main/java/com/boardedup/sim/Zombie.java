@@ -2,7 +2,7 @@ package com.boardedup.sim;
 
 import java.util.function.IntPredicate;
 
-/** State machine: OUTSIDE → BREACHING → CLIMBING → INSIDE. Port of client/src/sim/Zombie.ts. */
+/** State machine: OUTSIDE → BREACHING → CLIMBING → INSIDE. */
 public final class Zombie extends Body {
     public enum State { OUTSIDE, BREACHING, CLIMBING, INSIDE }
 

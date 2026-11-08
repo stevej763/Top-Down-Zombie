@@ -4,7 +4,10 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.IntPredicate;
 
-/** Port of client/src/sim/Player.ts, plus the co-op downed state (Java only for now). */
+/**
+ * A player: movement, aim, firing, perks, economy and the co-op downed state. The client predicts
+ * its own movement with a copy of the first half of {@link #update} (client/src/net/PlayerMotion.ts).
+ */
 public final class Player extends Body {
     /** DOWNED and DEAD only happen in co-op; solo goes straight to game over. */
     public enum State { ALIVE, DOWNED, DEAD }

@@ -1,5 +1,6 @@
 import { Game, VIEW_H, VIEW_W } from './core/Game';
 import { fetchMap, fetchMaps } from './net/api';
+import { Connection } from './net/Connection';
 
 const DEFAULT_MAP = 'house';
 
@@ -21,7 +22,7 @@ async function boot(): Promise<void> {
     const maps = await fetchMaps();
     const first = maps.find((m) => m.id === DEFAULT_MAP) ?? maps[0];
     if (!first) throw new Error('The server has no maps');
-    new Game(canvas, maps, await fetchMap(first.id)).start();
+    new Game(canvas, maps, await fetchMap(first.id), new Connection()).start();
   } catch (e) {
     console.error(e);
     const ctx = canvas.getContext('2d')!;

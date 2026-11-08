@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * A map document, as stored in {@code maps/*.json} and the {@code maps} table. Mirrors the client's
- * {@code MapDoc} in {@code world/MapData.ts}. Coordinates are tiles.
+ * {@code MapDoc} in {@code client/src/game/MapData.ts}. Coordinates are tiles.
  *
  * <p>Tile characters: {@code .} outside, {@code _} floor, {@code #} wall, {@code W} window,
  * {@code C} crate, {@code D} door.

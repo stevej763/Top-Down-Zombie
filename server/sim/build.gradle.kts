@@ -1,4 +1,4 @@
-// The game simulation: plain Java, no Spring. Ported from client/src/sim.
+// The game simulation: plain Java, no Spring.
 plugins {
     `java-library`
 }

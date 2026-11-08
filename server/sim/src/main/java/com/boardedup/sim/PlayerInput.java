@@ -1,7 +1,7 @@
 package com.boardedup.sim;
 
 /**
- * One tick of one player's intent, mirroring client/src/sim/input.ts. "Pressed" flags are true
+ * One tick of one player's intent, mirroring client/src/game/input.ts. "Pressed" flags are true
  * only on the tick the key went down.
  *
  * @param moveX movement direction, -1, 0 or 1 (likewise moveY)

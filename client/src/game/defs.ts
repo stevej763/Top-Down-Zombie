@@ -4,7 +4,8 @@ import powerUpsJson from '../../../shared/defs/powerups.json';
 import weaponsJson from '../../../shared/defs/weapons.json';
 
 /**
- * Typed views of the gameplay tuning in shared/defs/*.json (also loaded by the Java sim).
+ * Typed views of the gameplay tuning in shared/defs/*.json. The Java sim (server/sim) is what
+ * plays by these numbers; the client reads them for names, prices, ammo counts and drawing.
  * Visual-only data lives in render/visuals.ts.
  */
 
@@ -56,7 +57,6 @@ function withIds<K extends string, V>(table: Record<string, V>): Record<K, V & {
 
 export const WEAPONS: Record<WeaponId, WeaponDef> = withIds(weaponsJson.weapons as Record<string, Omit<WeaponDef, 'id'>>);
 export const STARTER_WEAPON = weaponsJson.starter as WeaponId;
-export const BOX_POOL = weaponsJson.boxPool as WeaponId[];
 
 /** Melee: used with F/V at any time, or automatically when the gun in hand is completely out of ammo. */
 export const KNIFE: {
@@ -75,33 +75,17 @@ export const MAX_TIER = UPGRADE.cost.length - 1;
 
 export const PERKS: Record<PerkId, PerkDef> = withIds(perksJson.perks);
 export const PERK_ORDER = perksJson.order as PerkId[];
-export const PERK_EFFECTS = perksJson.effects;
 
-export const STARTING_POINTS = economyJson.startingPoints;
-/** Max points from rebuilding barricades per round, so it can't be farmed. */
-export const REBUILD_CAP = economyJson.rebuildCap;
-export const POINTS = economyJson.points;
 export const BOX_COST = economyJson.boxCost;
 
 /** Index 0 = no armour. */
 export const ARMOUR_LEVELS: ArmourLevel[] = economyJson.armour.levels;
-/** Share of each hit that armour soaks up while it lasts. */
-export const ARMOUR_ABSORB = economyJson.armour.absorb;
 
 export function repairCost(level: number): number {
   return economyJson.armour.repairCostPerLevel * level;
 }
 
 export const POWERUPS: Record<PowerUpId, { id: PowerUpId; name: string }> = withIds(powerUpsJson.powerUps);
-export const POWERUP_IDS = Object.keys(POWERUPS) as PowerUpId[];
-export const POWERUP_TUNING = {
-  dropChance: powerUpsJson.dropChance,
-  maxPerRound: powerUpsJson.maxPerRound,
-  lifetime: powerUpsJson.lifetime,
-  /** Seconds a timed power-up lasts. */
-  duration: powerUpsJson.duration,
-  pickupRadius: powerUpsJson.pickupRadius,
-};
 
 /** A weapon's display name at an upgrade tier, e.g. "Shotgun Mk II". */
 export function weaponName(id: WeaponId, tier: number): string {
@@ -123,6 +107,12 @@ export function ammoCost(id: WeaponId, tier: number): number {
 
 // Constants that live in code in the Java sim (Player, Zombie), mirrored for the client.
 export const PLAYER_RADIUS = 12;
+/** Player.BASE_HP, before Tough Hide. */
+export const BASE_HP = 100;
+/** Pixels per second (Player.SPEED); the client predicts its own movement with it. */
+export const PLAYER_SPEED = 165;
+/** Planks a window holds (Barricade.MAX_PLANKS). */
+export const MAX_PLANKS = 6;
 export const ZOMBIE_RADIUS = 13;
 /** Seconds a downed co-op player lasts before bleeding out (Player.BLEEDOUT). */
 export const BLEEDOUT = 30;

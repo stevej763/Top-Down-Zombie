@@ -15,9 +15,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The whole game simulation: world state plus {@link #step}. A port of client/src/sim/GameSim.ts;
- * keep the two in step. Co-op (more than one player) is Java only: with one player it behaves
- * exactly like the TS sim. Not thread-safe: one thread steps a sim.
+ * The whole game simulation: world state plus {@link #step}. This is the only copy of the game
+ * rules; browsers send input and render snapshots. Not thread-safe: one thread steps a sim.
  */
 public final class GameSim {
     private static final String TILE_CHARS = "._#WCD";

@@ -1,8 +1,8 @@
 import { rand, TAU } from '../core/math';
 import {
   BLEEDOUT, KNIFE, PERKS, PLAYER_RADIUS, REVIVE_TIME, WEAPONS, ZOMBIE_RADIUS, type PerkDef, type WeaponDef,
-} from '../sim/defs';
-import { Tile, TILE, TileMap } from '../sim/TileMap';
+} from '../game/defs';
+import { Tile, TILE, TileMap } from '../game/TileMap';
 import { shadowText } from '../ui/text';
 import type { Fixture, WindowFixture } from '../view/Level';
 import { heldWeapon, type DropView, type InteractableView, type PlayerView, type ZombieView } from '../view/WorldView';

@@ -9,7 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Buyable things: port of client/src/sim/Interactables.ts. */
+/** Buyable things. The client draws and prompts for them by {@link Kind} (view/Level.ts {@code Fixture}). */
 public abstract sealed class Interactable {
     public enum Kind { WALL_BUY, PERK, ARMOUR, UPGRADE, BOX, DOOR }
 

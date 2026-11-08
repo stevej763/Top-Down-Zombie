@@ -1,13 +1,13 @@
-import type { PerkId, PowerUpId, WeaponId } from '../sim/defs';
-import type { PlayerInput } from '../sim/input';
-import type { MapDoc } from '../sim/MapData';
+import type { PerkId, PowerUpId, WeaponId } from '../game/defs';
+import type { PlayerInput } from '../game/input';
+import type { MapDoc } from '../game/MapData';
 import type { WorldView } from '../view/WorldView';
 
 /**
  * The /ws protocol: JSON messages with a `type` field. Mirrors the Java records in
  * server/app/.../game/protocol (ClientMessage, ClientInput, ServerMessage, Snapshot) and
  * server/sim SimEvent; keep the field names identical. Player ids are sim ids (small ints,
- * unique within a room), not account UUIDs. Not used by the client yet (Phase 4 M4).
+ * unique within a room), not account UUIDs.
  */
 
 // ----------------------------------------------------------------- client → server
@@ -74,7 +74,7 @@ export interface Snapshot extends WorldView {
 // ----------------------------------------------------------------- events
 
 /**
- * The Java SimEvent: sim/events.ts plus the acting `player` id, and the co-op events.
+ * The Java SimEvent (server/sim SimEvent.java), as JSON. `player` is the acting player.
  * For hits and kills, `player` is whoever got the points.
  */
 export type NetEvent =

@@ -2,7 +2,7 @@ package com.boardedup.sim;
 
 import java.util.List;
 
-/** Round flow and difficulty curves: port of client/src/sim/RoundManager.ts. */
+/** Round flow and difficulty curves. */
 public final class RoundManager {
     /** Zombies alive at once in a solo game; each extra player adds MAX_ALIVE_PER_PLAYER. */
     public static final int MAX_ALIVE = 24;

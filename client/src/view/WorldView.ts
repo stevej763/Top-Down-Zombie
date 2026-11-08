@@ -1,11 +1,10 @@
-import type { PerkId, PowerUpId, WeaponId } from '../sim/defs';
+import type { PerkId, PowerUpId, WeaponId } from '../game/defs';
 
 /**
  * What the renderer, HUD and prompts read: the dynamic world, shaped exactly like a server
  * snapshot (net/protocol.ts `Snapshot` is these fields plus `type`, `tick` and `acks`; the Java
  * records in game/protocol/Snapshot.java use the same names). The static half of a map (tiles,
- * window and fixture positions) is a `Level`. Today `localView` builds this from the TS sim;
- * from Phase 4 M4 it comes from interpolated snapshots.
+ * window and fixture positions) is a `Level`. `NetGame` builds it from interpolated snapshots.
  */
 export interface WorldView {
   round: RoundView;

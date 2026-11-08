@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonTypeName;
 
 /**
- * What the sim reports for clients to show or play, mirroring client/src/sim/events.ts (same
- * {@code type} names). Gameplay never depends on them. Positions are world px; {@code points} is
+ * What the sim reports for clients to show or play, sent as JSON and mirrored by
+ * {@code NetEvent} in client/src/net/protocol.ts (same {@code type} names). Gameplay never depends on them. Positions are world px; {@code points} is
  * what was awarded (after Double Points), 0 if none; {@code player} is the acting player's id
  * (for hits and kills, the one who got the points).
  */

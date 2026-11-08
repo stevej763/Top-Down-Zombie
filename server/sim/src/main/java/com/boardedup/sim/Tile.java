@@ -1,6 +1,6 @@
 package com.boardedup.sim;
 
-/** Tile types, matching client/src/sim/TileMap.ts. */
+/** Tile types, matching client/src/game/TileMap.ts. */
 public final class Tile {
     public static final int OUTSIDE = 0;
     public static final int FLOOR = 1;

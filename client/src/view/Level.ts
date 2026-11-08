@@ -1,7 +1,8 @@
 import type { Vec2 } from '../core/math';
-import type { PerkId, WeaponId } from '../sim/defs';
-import { parseMap, type DoorDef, type MapData, type MapDoc, type WallSpot, type WindowDef } from '../sim/MapData';
-import { TILE } from '../sim/TileMap';
+import { BASE_HP, magSize, MAX_PLANKS, reserveSize, STARTER_WEAPON, type PerkId, type WeaponId } from '../game/defs';
+import { parseMap, type DoorDef, type MapData, type MapDoc, type WallSpot, type WindowDef } from '../game/MapData';
+import { TILE } from '../game/TileMap';
+import type { WorldView } from './WorldView';
 
 /**
  * The static half of what the client draws: the parsed map plus where each window and buyable
@@ -57,4 +58,23 @@ export function buildLevel(doc: MapDoc): Level {
     }),
   ];
   return { data, windows, fixtures };
+}
+
+/** A world before any snapshot: one player on the start tile, every window boarded, doors shut. Behind the menus. */
+export function restingWorld(level: Level, playerId: number, name: string): WorldView {
+  const start = level.data.playerStart;
+  const w = STARTER_WEAPON;
+  return {
+    round: { n: 0, active: false, remaining: 0, intermission: 0 },
+    powerUps: { instakill: 0, double: 0, drops: [] },
+    players: [{
+      id: playerId, name, x: start.x, y: start.y, aim: 0, hp: BASE_HP, maxHp: BASE_HP, state: 'alive', bleedout: 0,
+      reviveProgress: 0, armour: 0, armourLevel: 0, points: 0, kills: 0, slot: 0,
+      weapons: [{ id: w, tier: 0, mag: magSize(w, 0), reserve: reserveSize(w, 0), reloadProgress: 0 }, null],
+      perks: [], invuln: 0, interaction: null,
+    }],
+    zombies: [],
+    windows: level.windows.map(() => MAX_PLANKS),
+    interactables: level.fixtures.map((f) => (f.kind === 'door' ? { open: false } : f.kind === 'box' ? { state: 'closed', timer: 0, owner: -1 } : {})),
+  };
 }
