@@ -1,0 +1,20 @@
+{
+  "weapons": {
+    "pistol": { "name": "Pistol", "cost": 0, "ammoCost": 0, "damage": 25, "pellets": 1, "spread": 0.03, "fireInterval": 0.25, "auto": false, "mag": 8, "reserve": 80, "reloadTime": 1.2, "range": 600, "penetration": 1 },
+    "shotgun": { "name": "Shotgun", "cost": 1000, "ammoCost": 500, "damage": 18, "pellets": 7, "spread": 0.38, "fireInterval": 0.9, "auto": false, "mag": 6, "reserve": 36, "reloadTime": 2.4, "range": 260, "penetration": 1 },
+    "smg": { "name": "SMG", "cost": 1200, "ammoCost": 600, "damage": 20, "pellets": 1, "spread": 0.07, "fireInterval": 0.07, "auto": true, "mag": 30, "reserve": 180, "reloadTime": 1.8, "range": 500, "penetration": 1 },
+    "rifle": { "name": "Rifle", "cost": 1500, "ammoCost": 750, "damage": 50, "pellets": 1, "spread": 0.02, "fireInterval": 0.12, "auto": true, "mag": 24, "reserve": 144, "reloadTime": 2.0, "range": 800, "penetration": 2 },
+    "lmg": { "name": "LMG", "cost": 0, "ammoCost": 0, "damage": 40, "pellets": 1, "spread": 0.08, "fireInterval": 0.09, "auto": true, "mag": 75, "reserve": 300, "reloadTime": 3.5, "range": 700, "penetration": 2 },
+    "magnum": { "name": "Hand Cannon", "cost": 0, "ammoCost": 0, "damage": 180, "pellets": 1, "spread": 0.01, "fireInterval": 0.4, "auto": false, "mag": 6, "reserve": 48, "reloadTime": 1.8, "range": 700, "penetration": 3 },
+    "plasma": { "name": "Plasma Caster", "cost": 0, "ammoCost": 0, "damage": 120, "pellets": 1, "spread": 0.02, "fireInterval": 0.35, "auto": false, "mag": 16, "reserve": 120, "reloadTime": 2.5, "range": 600, "penetration": 1, "splash": { "radius": 80, "damage": 220 } }
+  },
+  "starter": "pistol",
+  "boxPool": ["shotgun", "smg", "rifle", "lmg", "magnum", "plasma"],
+  "knife": { "damage": 150, "reach": 34, "arc": 1.8, "cooldown": 0.55, "swing": 0.18 },
+  "upgrade": {
+    "cost": [0, 3000, 6000],
+    "damage": [1, 1.75, 2.75],
+    "ammo": [1, 1.5, 2],
+    "suffix": ["", " Mk II", " Mk III"]
+  }
+}

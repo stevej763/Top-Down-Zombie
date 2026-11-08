@@ -1,4 +1,4 @@
-import type { MapDoc } from '../world/MapData';
+import type { MapDoc } from '../sim/MapData';
 
 /** REST client for the Spring Boot server. Every call can fail (server down, offline); callers fall back. */
 

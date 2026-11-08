@@ -5,11 +5,11 @@ export function drawGameOver(ctx: CanvasRenderingContext2D, game: Game): void {
   ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.75, game.gameOverTimer * 0.6)})`;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   shadowText(ctx, 'YOU DIED', VIEW_W / 2, 180, `80px ${DISPLAY_FONT}`, '#a01212', 'center', 'middle');
-  const rounds = Math.max(0, game.rounds.round - 1);
+  const rounds = Math.max(0, game.sim.rounds.round - 1);
   const lines = [
     `You survived ${rounds} round${rounds === 1 ? '' : 's'}`,
-    `Kills: ${game.kills}`,
-    `Points earned: ${game.economy.earned}`,
+    `Kills: ${game.sim.kills}`,
+    `Points earned: ${game.sim.economy.earned}`,
   ];
   lines.forEach((l, i) => shadowText(ctx, l, VIEW_W / 2, 270 + i * 32, '20px monospace', '#e0e0e0', 'center', 'middle'));
   const { lastRank, entries } = game.scores;

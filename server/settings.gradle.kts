@@ -1,3 +1,3 @@
 rootProject.name = "boarded-up-server"
 
-include("app")
+include("sim", "app")

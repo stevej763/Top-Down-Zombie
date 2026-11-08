@@ -1,0 +1,13 @@
+{
+  "powerUps": {
+    "ammo": { "name": "Full Ammo" },
+    "instakill": { "name": "Instakill" },
+    "double": { "name": "Double Points" },
+    "nuke": { "name": "Detonation" }
+  },
+  "dropChance": 0.03,
+  "maxPerRound": 4,
+  "lifetime": 25,
+  "duration": 20,
+  "pickupRadius": 24
+}

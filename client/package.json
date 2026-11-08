@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "parity": "vite-node scripts/parity.ts"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vite-node": "^6.0.0"
   }
 }

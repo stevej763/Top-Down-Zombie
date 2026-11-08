@@ -1,4 +1,5 @@
 import type { Game } from '../core/Game';
+import { glowOf, WEAPON_FX } from './visuals';
 
 const DARKNESS = 'rgba(4, 5, 10, 0.86)';
 const FLASHLIGHT_RANGE = 430;
@@ -24,7 +25,9 @@ export class Lighting {
     c.fillRect(0, 0, this.w, this.h);
     c.globalCompositeOperation = 'destination-out';
 
-    const p = game.player;
+    const sim = game.sim;
+    const p = sim.player;
+    const flash = game.playerFx.flash > 0;
     const px = p.x - camX;
     const py = p.y - camY;
     this.glow(px, py, 150, 0.95);
@@ -40,32 +43,33 @@ export class Lighting {
     c.closePath();
     c.fill();
 
-    for (const b of game.barricades) this.glow(b.center.x - camX, b.center.y - camY, 110, 0.55);
-    for (const it of game.interactables) {
-      if (it.glow) this.glow(it.standX - camX, it.standY - camY, 60, 0.45);
+    for (const b of sim.barricades) this.glow(b.center.x - camX, b.center.y - camY, 110, 0.55);
+    for (const it of sim.interactables) {
+      if (glowOf(it)) this.glow(it.standX - camX, it.standY - camY, 60, 0.45);
     }
-    for (const d of game.powerUps.drops) this.glow(d.x - camX, d.y - camY, 70, 0.6);
-    if (p.flash > 0) this.glow(px, py, 260, 0.7);
+    for (const d of sim.powerUps.drops) this.glow(d.x - camX, d.y - camY, 70, 0.6);
+    if (flash) this.glow(px, py, 260, 0.7);
 
     target.drawImage(this.canvas, 0, 0);
 
     // Coloured light from machines, added on top of the darkness.
     target.save();
     target.globalCompositeOperation = 'lighter';
-    for (const it of game.interactables) {
-      if (!it.glow) continue;
+    for (const it of sim.interactables) {
+      const glow = glowOf(it);
+      if (!glow) continue;
       const x = it.standX - camX;
       const y = it.standY - camY;
       const g = target.createRadialGradient(x, y, 0, x, y, 70);
-      g.addColorStop(0, `rgba(${it.glow}, 0.22)`);
-      g.addColorStop(1, `rgba(${it.glow}, 0)`);
+      g.addColorStop(0, `rgba(${glow}, 0.22)`);
+      g.addColorStop(1, `rgba(${glow}, 0)`);
       target.fillStyle = g;
       target.fillRect(x - 70, y - 70, 140, 140);
     }
-    if (p.flash > 0) {
+    if (flash) {
       // Muzzle light in the gun's own colour.
-      const fx = p.weapon.def.fx;
-      const md = 24 + p.weapon.def.barrel;
+      const fx = WEAPON_FX[p.weapon.def.id];
+      const md = 24 + fx.barrel;
       const x = px + Math.cos(p.aim) * md;
       const y = py + Math.sin(p.aim) * md;
       const r = 110 * fx.flashSize;

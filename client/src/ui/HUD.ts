@@ -1,14 +1,16 @@
 import { VIEW_H, VIEW_W, type Game } from '../core/Game';
 import { sound } from '../audio/Sound';
-import { ARMOUR_LEVELS } from '../systems/Armour';
-import { PERK_ORDER, PERKS } from '../systems/Perks';
+import { PERK_VISUALS } from '../render/visuals';
+import { ARMOUR_LEVELS, PERK_ORDER } from '../sim/defs';
+import { interactionPrompt } from './prompts';
 import { DISPLAY_FONT, shadowText } from './text';
 
 export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
-  const { player, economy, rounds } = game;
+  const { sim } = game;
+  const { player, economy, rounds, powerUps } = sim;
 
   // Damage vignette.
-  const a = Math.min(0.85, (1 - player.hp / player.maxHp) * 0.7 + player.hurtFlash * 0.35);
+  const a = Math.min(0.85, (1 - player.hp / player.maxHp) * 0.7 + game.playerFx.hurtFlash * 0.35);
   if (a > 0.01) {
     const g = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.3, VIEW_W / 2, VIEW_H / 2, VIEW_W * 0.65);
     g.addColorStop(0, 'rgba(120, 0, 0, 0)');
@@ -20,7 +22,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   // Round number + status.
   if (rounds.round > 0) shadowText(ctx, String(rounds.round), 24, 12, `64px ${DISPLAY_FONT}`, '#a01212', 'left', 'top');
   const status = rounds.active
-    ? `${rounds.remaining(game)} zombies left`
+    ? `${rounds.remaining(sim)} zombies left`
     : `${rounds.round > 0 ? 'Next round' : 'Get ready'} in ${Math.ceil(rounds.intermission)}`;
   shadowText(ctx, status, 26, 90, '14px monospace', '#c8c8c8', 'left', 'top');
 
@@ -42,7 +44,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   let px = 24;
   for (const id of PERK_ORDER) {
     if (!player.perks.has(id)) continue;
-    const perk = PERKS[id];
+    const perk = PERK_VISUALS[id];
     ctx.fillStyle = perk.color;
     ctx.fillRect(px, VIEW_H - 100, 22, 22);
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
@@ -72,7 +74,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   if (warn) shadowText(ctx, warn, VIEW_W / 2, VIEW_H / 2 + 60, 'bold 16px monospace', warn.startsWith('NO AMMO') ? '#d03030' : '#ffffff', 'center');
 
   // Interaction prompt.
-  const prompt = interactionPrompt(game);
+  const prompt = interactionPrompt(sim, player.interaction);
   if (prompt) {
     ctx.font = '16px monospace';
     const tw = ctx.measureText(prompt.text).width;
@@ -83,8 +85,8 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
 
   // Active power-ups, top centre.
   const timers: [string, number, string][] = [];
-  if (game.powerUps.instakill > 0) timers.push(['INSTAKILL', game.powerUps.instakill, '#e04040']);
-  if (game.powerUps.double > 0) timers.push(['DOUBLE POINTS', game.powerUps.double, '#f2d15c']);
+  if (powerUps.instakill > 0) timers.push(['INSTAKILL', powerUps.instakill, '#e04040']);
+  if (powerUps.double > 0) timers.push(['DOUBLE POINTS', powerUps.double, '#f2d15c']);
   timers.forEach(([label, t, color], i) => {
     if (t < 5 && Math.floor(t * 6) % 2 === 0) return;
     shadowText(ctx, `${label} ${Math.ceil(t)}`, VIEW_W / 2, 24 + i * 22, 'bold 16px monospace', color, 'center', 'top');
@@ -104,18 +106,11 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   if (sound.muted) shadowText(ctx, 'MUTED (M)', VIEW_W - 16, 16, '12px monospace', '#9a9a9a', 'right', 'top');
 
   // Round banner.
-  if (rounds.bannerTimer > 0) {
-    ctx.globalAlpha = Math.min(1, rounds.bannerTimer);
-    shadowText(ctx, rounds.bannerText, VIEW_W / 2, VIEW_H * 0.3, `56px ${DISPLAY_FONT}`, '#a01212', 'center', 'middle');
+  if (game.banner.timer > 0) {
+    ctx.globalAlpha = Math.min(1, game.banner.timer);
+    shadowText(ctx, game.banner.text, VIEW_W / 2, VIEW_H * 0.3, `56px ${DISPLAY_FONT}`, '#a01212', 'center', 'middle');
     ctx.globalAlpha = 1;
   }
-}
-
-function interactionPrompt(game: Game): { text: string; color: string } | null {
-  const it = game.interaction;
-  if (!it) return null;
-  if (it.kind === 'rebuild') return { text: 'Hold E to rebuild barricade', color: '#ffffff' };
-  return it.target.prompt(game);
 }
 
 const RELOAD_BAR_W = 120;

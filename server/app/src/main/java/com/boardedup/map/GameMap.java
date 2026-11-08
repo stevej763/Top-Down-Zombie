@@ -1,5 +1,6 @@
 package com.boardedup.map;
 
+import com.boardedup.sim.map.MapDoc;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

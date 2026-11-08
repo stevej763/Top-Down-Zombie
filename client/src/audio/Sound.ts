@@ -1,5 +1,5 @@
 import { rand } from '../core/math';
-import type { WeaponId } from '../weapons/WeaponDefs';
+import type { WeaponId } from '../sim/defs';
 import { TRACKS, type Track } from './tracks';
 
 // Gains at 100% on the matching slider.

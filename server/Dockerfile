@@ -1,10 +1,11 @@
-# Built from the repo root (see docker-compose.yml) because the jar bundles ../maps.
+# Built from the repo root (see docker-compose.yml) because the jar bundles ../maps and ../shared/defs.
 
 # --- Build stage: compile and package the Spring Boot jar ---
 FROM gradle:9-jdk25 AS build
 WORKDIR /src
 COPY server server
 COPY maps maps
+COPY shared shared
 WORKDIR /src/server
 RUN ./gradlew :app:bootJar --no-daemon -q
 

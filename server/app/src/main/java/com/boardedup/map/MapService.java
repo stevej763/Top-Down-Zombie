@@ -1,5 +1,7 @@
 package com.boardedup.map;
 
+import com.boardedup.sim.map.MapDoc;
+import com.boardedup.sim.map.MapValidator;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
