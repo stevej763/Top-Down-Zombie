@@ -4,7 +4,8 @@ import {
 } from '../game/defs';
 import { Tile, TILE, TileMap } from '../game/TileMap';
 import { shadowText } from '../ui/text';
-import type { Fixture, WindowFixture } from '../view/Level';
+import type { WallSpot } from '../game/MapData';
+import type { Fixture, LightArea, WindowFixture } from '../view/Level';
 import { heldWeapon, type DropView, type InteractableView, type PlayerView, type ZombieView } from '../view/WorldView';
 import {
   LOCAL_BODY, PERK_VISUALS, POWERUP_VISUALS, TEAM_BODIES, WEAPON_FX, type PlayerFx, type ZombieFx,
@@ -143,18 +144,18 @@ export function drawWallBuy(ctx: CanvasRenderingContext2D, tx: number, ty: numbe
   ctx.restore();
 }
 
-/** A vending-machine style perk dispenser filling its wall tile. */
-export function drawPerkMachine(ctx: CanvasRenderingContext2D, tx: number, ty: number, perk: PerkDef, time: number): void {
+/** A vending-machine style perk dispenser filling its wall tile; dark and still without power. */
+export function drawPerkMachine(ctx: CanvasRenderingContext2D, tx: number, ty: number, perk: PerkDef, time: number, powered: boolean): void {
   const x = tx * TILE;
   const y = ty * TILE;
   ctx.fillStyle = '#1a1a1f';
   ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
   const look = PERK_VISUALS[perk.id];
   ctx.fillStyle = look.color;
-  ctx.globalAlpha = 0.75 + Math.sin(time * 3 + tx) * 0.15;
+  ctx.globalAlpha = powered ? 0.75 + Math.sin(time * 3 + tx) * 0.15 : 0.22;
   ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
   ctx.globalAlpha = 1;
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = powered ? '#fff' : '#55555c';
   ctx.font = 'bold 16px Impact, "Arial Black", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -182,12 +183,12 @@ export function drawArmourBench(ctx: CanvasRenderingContext2D, tx: number, ty: n
   ctx.stroke();
 }
 
-export function drawUpgradeBench(ctx: CanvasRenderingContext2D, tx: number, ty: number, time: number): void {
+export function drawUpgradeBench(ctx: CanvasRenderingContext2D, tx: number, ty: number, time: number, powered: boolean): void {
   const cx = tx * TILE + TILE / 2;
   const cy = ty * TILE + TILE / 2;
   ctx.fillStyle = '#221a2a';
   ctx.fillRect(cx - 15, cy - 15, 30, 30);
-  ctx.fillStyle = `rgba(190, 110, 255, ${0.7 + Math.sin(time * 5) * 0.3})`;
+  ctx.fillStyle = `rgba(190, 110, 255, ${powered ? 0.7 + Math.sin(time * 5) * 0.3 : 0.18})`;
   for (const off of [-5, 4]) {
     ctx.beginPath();
     ctx.moveTo(cx, cy + off - 7);
@@ -198,8 +199,8 @@ export function drawUpgradeBench(ctx: CanvasRenderingContext2D, tx: number, ty: 
   }
 }
 
-/** Two-tile wooden chest; `open` shows the lid raised with a glow inside. */
-export function drawMysteryBox(ctx: CanvasRenderingContext2D, tx: number, ty: number, open: boolean): void {
+/** Two-tile wooden chest; `open` shows the lid raised with a glow inside. Its mark is dull until the power is on. */
+export function drawMysteryBox(ctx: CanvasRenderingContext2D, tx: number, ty: number, open: boolean, powered: boolean): void {
   const x = tx * TILE + 2;
   const y = ty * TILE + 4;
   const w = TILE * 2 - 4;
@@ -214,15 +215,69 @@ export function drawMysteryBox(ctx: CanvasRenderingContext2D, tx: number, ty: nu
   } else {
     ctx.fillStyle = '#5a3a1c';
     ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
-    ctx.fillStyle = '#f2d15c';
+    ctx.fillStyle = powered ? '#f2d15c' : '#6e5a2e';
     ctx.font = 'bold 16px Impact, "Arial Black", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('?', x + w / 2, y + h / 2 + 1);
   }
-  ctx.strokeStyle = '#c9a040';
+  ctx.strokeStyle = powered ? '#c9a040' : '#6e5a2e';
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, w, h);
+}
+
+/** A breaker panel on its wall tile: lever down with a red lamp, or thrown up with a green one. */
+export function drawPowerSwitch(ctx: CanvasRenderingContext2D, spot: WallSpot, on: boolean, time: number): void {
+  ctx.save();
+  ctx.translate(spot.tx * TILE + TILE / 2, spot.ty * TILE + TILE / 2);
+  // Draw it upright with "down" pointing away from the floor it's used from.
+  ctx.rotate(Math.atan2(spot.ny, spot.nx) + Math.PI / 2);
+  ctx.fillStyle = '#2a2d33';
+  ctx.fillRect(-13, -14, 26, 28);
+  ctx.strokeStyle = '#6a7078';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-13, -14, 26, 28);
+  // Hazard stripe along the top.
+  ctx.fillStyle = '#d8b030';
+  ctx.fillRect(-11, -12, 22, 3);
+  ctx.fillStyle = '#15171b';
+  ctx.fillRect(-3, -6, 6, 16);
+  ctx.fillStyle = '#b8bcc4';
+  ctx.fillRect(-1.5, on ? -5 : 1, 3, 8);
+  ctx.fillRect(-5, on ? -8 : 6, 10, 4);
+  const blink = on || Math.floor(time * 2) % 2 === 0;
+  ctx.fillStyle = on ? '#5ae07a' : blink ? '#ff4630' : '#5a1810';
+  ctx.beginPath();
+  ctx.arc(8, -4, 2.5, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Ceiling lamps: dark fittings, then (after lighting, with `light` > 0) glowing bulbs. */
+export function drawLamps(ctx: CanvasRenderingContext2D, lights: LightArea[], light: number): void {
+  for (const area of lights) {
+    for (const l of area.lamps) {
+      if (light <= 0) {
+        ctx.fillStyle = '#26262b';
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, 5, 0, TAU);
+        ctx.fill();
+        ctx.strokeStyle = '#3a3a42';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        continue;
+      }
+      const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 22);
+      g.addColorStop(0, `rgba(255, 235, 190, ${0.5 * light})`);
+      g.addColorStop(1, 'rgba(255, 235, 190, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(l.x - 22, l.y - 22, 44, 44);
+      ctx.fillStyle = `rgba(255, 248, 225, ${light})`;
+      ctx.beginPath();
+      ctx.arc(l.x, l.y, 4, 0, TAU);
+      ctx.fill();
+    }
+  }
 }
 
 export function drawDoor(ctx: CanvasRenderingContext2D, tiles: [number, number][]): void {
@@ -465,25 +520,29 @@ export function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: numbe
   ctx.fillRect(x - 1, y - 1, 2, 2);
 }
 
-export function drawInteractable(ctx: CanvasRenderingContext2D, f: Fixture, s: InteractableView, time: number): void {
+/** `powered` is `WorldView.power`. */
+export function drawInteractable(ctx: CanvasRenderingContext2D, f: Fixture, s: InteractableView, time: number, powered: boolean): void {
   switch (f.kind) {
     case 'wallBuy':
       drawWallBuy(ctx, f.spot.tx, f.spot.ty, WEAPONS[f.weapon]);
       break;
     case 'perk':
-      drawPerkMachine(ctx, f.spot.tx, f.spot.ty, PERKS[f.perk], time);
+      drawPerkMachine(ctx, f.spot.tx, f.spot.ty, PERKS[f.perk], time, powered);
       break;
     case 'armour':
       drawArmourBench(ctx, f.spot.tx, f.spot.ty);
       break;
     case 'upgrade':
-      drawUpgradeBench(ctx, f.spot.tx, f.spot.ty, time);
+      drawUpgradeBench(ctx, f.spot.tx, f.spot.ty, time, powered);
       break;
     case 'box':
-      drawMysteryBox(ctx, f.tx, f.ty, (s.state ?? 'closed') !== 'closed');
+      drawMysteryBox(ctx, f.tx, f.ty, (s.state ?? 'closed') !== 'closed', powered);
       break;
     case 'door':
       if (!s.open) drawDoor(ctx, f.def.tiles);
+      break;
+    case 'power':
+      drawPowerSwitch(ctx, f.spot, powered, time);
       break;
   }
 }

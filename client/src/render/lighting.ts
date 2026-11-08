@@ -1,3 +1,4 @@
+import { TILE } from '../game/TileMap';
 import type { Level } from '../view/Level';
 import { heldWeapon, type WorldView } from '../view/WorldView';
 import { glowOf, WEAPON_FX, type PlayerFx } from './visuals';
@@ -5,11 +6,24 @@ import { glowOf, WEAPON_FX, type PlayerFx } from './visuals';
 const DARKNESS = 'rgba(4, 5, 10, 0.86)';
 const FLASHLIGHT_RANGE = 430;
 const FLASHLIGHT_HALF_ANGLE = 0.5;
+/** "r, g, b" of the room lights. */
+const ROOM_LIGHT = '255, 225, 170';
+/** How much of the darkness the room lights lift: evenly across a room, and extra under each lamp. */
+const ROOM_FILL = 0.5;
+const LAMP_GLOW = 0.5;
+const LAMP_RADIUS = 6 * TILE;
+/** Share of the darkness the lights mask removes at full strength; the rest keeps the mood. */
+const ROOM_LIGHT_STRENGTH = 0.92;
+/** Warm tint the lights add on top. */
+const ROOM_TINT = 0.07;
 
-/** Darkness overlay with lights punched out of it (each player's glow and flashlight cone, windows). */
+/** Darkness overlay with lights punched out of it (each player's glow and flashlight cone, windows, room lights). */
 export class Lighting {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
+  /** The room lights for `roomsOf`, drawn once per level at map size. */
+  private rooms: HTMLCanvasElement | null = null;
+  private roomsOf: Level | null = null;
 
   constructor(private w: number, private h: number) {
     this.canvas = document.createElement('canvas');
@@ -18,9 +32,10 @@ export class Lighting {
     this.ctx = this.canvas.getContext('2d')!;
   }
 
-  /** `fxOf` gives each player's muzzle-flash state. */
+  /** `fxOf` gives each player's muzzle-flash state; `light` is how bright the room lights are, 0..1. */
   draw(
     target: CanvasRenderingContext2D, level: Level, world: WorldView, fxOf: (id: number) => PlayerFx, camX: number, camY: number,
+    light: number,
   ): void {
     const c = this.ctx;
     c.globalCompositeOperation = 'source-over';
@@ -28,6 +43,13 @@ export class Lighting {
     c.fillStyle = DARKNESS;
     c.fillRect(0, 0, this.w, this.h);
     c.globalCompositeOperation = 'destination-out';
+
+    const rooms = light > 0 ? this.roomLights(level) : null;
+    if (rooms) {
+      c.globalAlpha = light * ROOM_LIGHT_STRENGTH;
+      c.drawImage(rooms, -camX, -camY);
+      c.globalAlpha = 1;
+    }
 
     // Everyone carries a light; a downed player's torch has dropped, so only their glow is left.
     const lit = world.players.filter((p) => p.state !== 'dead');
@@ -53,7 +75,7 @@ export class Lighting {
 
     for (const b of level.windows) this.glow(b.center.x - camX, b.center.y - camY, 110, 0.55);
     for (const f of level.fixtures) {
-      if (glowOf(f)) this.glow(f.x - camX, f.y - camY, 60, 0.45);
+      if (glowOf(f, world.power)) this.glow(f.x - camX, f.y - camY, 60, 0.45);
     }
     for (const d of world.powerUps.drops) this.glow(d.x - camX, d.y - camY, 70, 0.6);
     const firing = lit.filter((p) => p.state === 'alive' && fxOf(p.id).flash > 0);
@@ -64,8 +86,13 @@ export class Lighting {
     // Coloured light from machines, added on top of the darkness.
     target.save();
     target.globalCompositeOperation = 'lighter';
+    if (rooms) {
+      target.globalAlpha = light * ROOM_TINT;
+      target.drawImage(rooms, -camX, -camY);
+      target.globalAlpha = 1;
+    }
     for (const f of level.fixtures) {
-      const glow = glowOf(f);
+      const glow = glowOf(f, world.power);
       if (!glow) continue;
       const x = f.x - camX;
       const y = f.y - camY;
@@ -89,6 +116,37 @@ export class Lighting {
       target.fillRect(x - r, y - r, r * 2, r * 2);
     }
     target.restore();
+  }
+
+  /** Each room filled evenly plus a pool under each lamp, clipped to the room and its walls. Null without any. */
+  private roomLights(level: Level): HTMLCanvasElement | null {
+    if (this.roomsOf === level) return this.rooms;
+    this.roomsOf = level;
+    this.rooms = null;
+    if (level.lights.length === 0) return null;
+    const map = level.data.map;
+    const canvas = document.createElement('canvas');
+    canvas.width = map.pxW;
+    canvas.height = map.pxH;
+    const c = canvas.getContext('2d')!;
+    for (const area of level.lights) {
+      c.save();
+      c.beginPath();
+      for (const i of area.tiles) c.rect((i % map.w) * TILE, Math.floor(i / map.w) * TILE, TILE, TILE);
+      c.clip();
+      c.fillStyle = `rgba(${ROOM_LIGHT}, ${ROOM_FILL})`;
+      c.fillRect(0, 0, map.pxW, map.pxH);
+      for (const l of area.lamps) {
+        const g = c.createRadialGradient(l.x, l.y, 0, l.x, l.y, LAMP_RADIUS);
+        g.addColorStop(0, `rgba(${ROOM_LIGHT}, ${LAMP_GLOW})`);
+        g.addColorStop(1, `rgba(${ROOM_LIGHT}, 0)`);
+        c.fillStyle = g;
+        c.fillRect(l.x - LAMP_RADIUS, l.y - LAMP_RADIUS, LAMP_RADIUS * 2, LAMP_RADIUS * 2);
+      }
+      c.restore();
+    }
+    this.rooms = canvas;
+    return canvas;
   }
 
   private glow(x: number, y: number, r: number, strength: number): void {

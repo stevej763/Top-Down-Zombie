@@ -46,6 +46,8 @@ public sealed interface SimEvent {
     record PlankTorn(double x, double y) implements SimEvent {}
     @JsonTypeName("plankPlaced")
     record PlankPlaced(int player, double x, double y, int points) implements SimEvent {}
+    @JsonTypeName("powerOn")
+    record PowerOn(int player) implements SimEvent {}
     @JsonTypeName("doorOpened")
     record DoorOpened(double x, double y) implements SimEvent {}
     @JsonTypeName("denied")

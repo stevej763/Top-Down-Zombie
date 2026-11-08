@@ -57,6 +57,13 @@ class MapValidatorTest {
     }
 
     @Test
+    void powerSwitchIsOptionalButMustBeOnAWall() throws IOException {
+        assertThat(houseWith(m -> m.put("power", Map.of("tx", 4, "ty", 6, "nx", 1, "ny", 0)))).isEmpty();
+        assertThat(houseWith(m -> m.put("power", Map.of("tx", 9, "ty", 9, "nx", 0, "ny", 1))))
+                .anyMatch(e -> e.contains("power switch") && e.contains("wall tile"));
+    }
+
+    @Test
     void windowMustBeOnAWindowTile() throws IOException {
         assertThat(houseWith(m -> list(m, "windows").getFirst().put("tx", 12)))
                 .anyMatch(e -> e.contains("window at 12,4") && e.contains("not 'W'"));

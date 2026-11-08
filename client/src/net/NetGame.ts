@@ -116,6 +116,7 @@ export class NetGame {
 
     return {
       round: latest.round,
+      power: latest.power,
       powerUps: latest.powerUps,
       players,
       zombies,

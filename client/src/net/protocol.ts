@@ -99,6 +99,7 @@ export type NetEvent =
   | { type: 'plankTorn'; x: number; y: number }
   | { type: 'plankPlaced'; player: number; x: number; y: number; points: number }
   | { type: 'doorOpened'; x: number; y: number }
+  | { type: 'powerOn'; player: number }
   | { type: 'denied'; player: number }
   | { type: 'weaponGiven'; player: number; weapon: WeaponId; tier: number }
   | { type: 'ammoBought'; player: number }

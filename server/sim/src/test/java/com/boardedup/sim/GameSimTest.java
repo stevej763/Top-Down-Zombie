@@ -7,6 +7,7 @@ import com.boardedup.sim.Interactable.ArmourBench;
 import com.boardedup.sim.Interactable.Door;
 import com.boardedup.sim.Interactable.MysteryBox;
 import com.boardedup.sim.Interactable.PerkMachine;
+import com.boardedup.sim.Interactable.PowerSwitch;
 import com.boardedup.sim.Interactable.UpgradeBench;
 import com.boardedup.sim.map.MapDoc;
 import java.io.IOException;
@@ -140,7 +141,7 @@ class GameSimTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"house", "cabin"})
+    @ValueSource(strings = {"house", "farmstead"})
     void botSurvivesTheFirstRound(String map) {
         GameSim s = solo(map, 7);
         for (int i = 0; i < 60 * 600 && !s.over && s.rounds.round < 6; i++) {
@@ -257,6 +258,53 @@ class GameSimTest {
         press(s, PlayerInput.Builder::interact);
         assertThat(player(s).weapons[1].def.id()).isEqualTo(shown);
         assertThat(player(s).slot).isEqualTo(1);
+    }
+
+    @Test
+    void powerSwitchWakesTheMachines() {
+        GameSim s = solo("farmstead", 1);
+        s.rounds.intermission = 1e9;
+        for (Interactable it : List.copyOf(s.interactables)) if (it instanceof Door d) s.openDoor(d);
+        player(s).economy.points = 50000;
+        assertThat(s.power).isFalse();
+
+        // Dead machines still prompt, but pressing E takes nothing and does nothing.
+        MysteryBox box = find(s, MysteryBox.class, b -> true);
+        PerkMachine perk = find(s, PerkMachine.class, p -> true);
+        UpgradeBench bench = find(s, UpgradeBench.class, b -> true);
+        for (Interactable it : List.<Interactable>of(box, perk, bench)) {
+            standAt(s, it.standX, it.standY);
+            idle(s, 1);
+            assertThat(player(s).interaction).isEqualTo(new Interaction.Use(it));
+            press(s, PlayerInput.Builder::interact);
+        }
+        assertThat(box.state).isEqualTo(MysteryBox.State.CLOSED);
+        assertThat(player(s).perks).isEmpty();
+        assertThat(player(s).weapon().tier).isZero();
+        assertThat(player(s).economy.points).isEqualTo(50000);
+
+        PowerSwitch sw = find(s, PowerSwitch.class, p -> true);
+        standAt(s, sw.standX, sw.standY);
+        idle(s, 1);
+        press(s, PlayerInput.Builder::interact);
+        assertThat(s.power).isTrue();
+        assertThat(s.events).contains(new SimEvent.PowerOn(player(s).id));
+        assertThat(player(s).economy.points).isEqualTo(50000);
+        idle(s, 1);
+        assertThat(player(s).interaction).isNull();
+
+        standAt(s, box.standX, box.standY);
+        idle(s, 1);
+        press(s, PlayerInput.Builder::interact);
+        assertThat(box.state).isEqualTo(MysteryBox.State.ROLLING);
+        assertThat(player(s).economy.points).isEqualTo(50000 - s.defs.boxCost);
+    }
+
+    @Test
+    void mapsWithoutASwitchArePoweredFromTheStart() {
+        GameSim s = quiet();
+        assertThat(s.power).isTrue();
+        assertThat(s.interactables).noneMatch(it -> it instanceof PowerSwitch);
     }
 
     @Test

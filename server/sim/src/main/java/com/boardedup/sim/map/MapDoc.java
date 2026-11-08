@@ -25,7 +25,12 @@ public record MapDoc(
         WallSpot armour,
         WallSpot upgrade,
         /** Left tile of the 2-tile mystery box; it's used from the row below. */
-        TilePos box) {
+        TilePos box,
+        /**
+         * Optional power switch. On a map with one, the box, perk machines and upgrade bench stay
+         * dead (and the buildings dark) until a player throws it; without one they work from the start.
+         */
+        WallSpot power) {
 
     public record TilePos(int tx, int ty) {}
 

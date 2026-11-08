@@ -4,6 +4,7 @@ import com.boardedup.sim.Interactable.ArmourBench;
 import com.boardedup.sim.Interactable.Door;
 import com.boardedup.sim.Interactable.MysteryBox;
 import com.boardedup.sim.Interactable.PerkMachine;
+import com.boardedup.sim.Interactable.PowerSwitch;
 import com.boardedup.sim.Interactable.UpgradeBench;
 import com.boardedup.sim.Interactable.WallBuy;
 import com.boardedup.sim.map.MapDoc;
@@ -29,6 +30,8 @@ public final class GameSim {
     public final List<Barricade> barricades;
     public final List<Interactable> interactables = new ArrayList<>();
     public final Set<String> openRooms = new HashSet<>();
+    /** Whether the box, perks and upgrade bench work. Starts on unless the map has a power switch. */
+    public boolean power;
     /** In join order; the first one spawns exactly on the map's start. */
     public final List<Player> players = new ArrayList<>();
     public final List<Zombie> zombies = new ArrayList<>();
@@ -73,6 +76,8 @@ public final class GameSim {
         interactables.add(new UpgradeBench(doc.upgrade()));
         interactables.add(new MysteryBox(doc.box().tx(), doc.box().ty()));
         for (var d : doc.doors()) interactables.add(new Door(d));
+        if (doc.power() != null) interactables.add(new PowerSwitch(doc.power()));
+        this.power = doc.power() == null;
         openRooms.add(doc.startRoom());
         double t = TileMap.TILE;
         this.startX = doc.playerStart().tx() * t + t / 2;
@@ -465,6 +470,13 @@ public final class GameSim {
         p.weapons[slot] = w;
         p.slot = slot;
         emit(new SimEvent.WeaponGiven(p.id, w.def.id(), w.tier));
+    }
+
+    /** Once on, the power stays on for the rest of the game. */
+    public void turnOnPower(Player by) {
+        if (power) return;
+        power = true;
+        emit(new SimEvent.PowerOn(by.id));
     }
 
     public void openDoor(Door door) {

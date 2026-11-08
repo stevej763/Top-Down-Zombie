@@ -4,8 +4,8 @@ import type { Link } from '../net/Connection';
 import { NetGame } from '../net/NetGame';
 import type { GameResult, LobbyPlayer, NetEvent, ServerMessage } from '../net/protocol';
 import {
-  drawCrosshair, drawInteractable, drawInteractableOverlay, drawPlayer, drawPlayerOverlay, drawPowerUps, drawWindow,
-  drawZombie, renderMap,
+  drawCrosshair, drawInteractable, drawInteractableOverlay, drawLamps, drawPlayer, drawPlayerOverlay, drawPowerUps,
+  drawWindow, drawZombie, renderMap,
 } from '../render/draw';
 import { Lighting } from '../render/lighting';
 import {
@@ -37,6 +37,11 @@ const DOWN_RED = '#e05040';
 const STALE_EVENT_TICKS = 30;
 /** After a reconnect, the server says `welcome` if our seat is still there; past this, it's gone. */
 const RESUME_TIMEOUT = 3;
+const POWER_COLOR = '#ffd860';
+/** The room lights stutter on like old tubes: [seconds since the switch, brightness] keyframes, then stay on. */
+const POWER_FLICKER: [number, number][] = [
+  [0, 0], [0.12, 0.9], [0.2, 0], [0.45, 0], [0.5, 0.6], [0.6, 0.1], [0.75, 0.15], [0.8, 1], [0.9, 0.3], [1.0, 0.45], [1.5, 1],
+];
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover';
 
@@ -105,6 +110,8 @@ export class Game {
   nowPlaying = { title: '', timer: 0 };
   /** White flash overlay (nuke). */
   screenFlash = 0;
+  /** When the power came on, for the flicker; -Infinity if it was already on when we joined. */
+  private powerOnAt = -Infinity;
 
   private groanTimer = 2;
   private last = 0;
@@ -196,6 +203,7 @@ export class Game {
     this.banner.timer = 0;
     this.feed = [];
     this.screenFlash = 0;
+    this.powerOnAt = -Infinity;
   }
 
   /** The local player. */
@@ -647,6 +655,14 @@ export class Game {
         this.particles.debris(e.x, e.y);
         sound.door();
         break;
+      case 'powerOn':
+        // Shared, like a power-up: everyone sees the lights come on.
+        this.powerOnAt = this.time;
+        this.showCallout('POWER ON', POWER_COLOR);
+        if (!mine) this.addFeed(`${this.nameOf(e.player)} turned on the power`, POWER_COLOR);
+        this.camera.addShake(4);
+        sound.powerOn();
+        break;
       case 'denied':
         if (!mine) break;
         this.playerText('Not enough points', '#d05050');
@@ -706,6 +722,19 @@ export class Game {
 
   // ---------------------------------------------------------------- render
 
+  /** Brightness of the room lights, 0..1: off without power (or on maps without lights), flickering just after the switch. */
+  private roomLight(): number {
+    if (!this.world.power || this.level.lights.length === 0) return 0;
+    const t = this.time - this.powerOnAt;
+    for (let i = 1; i < POWER_FLICKER.length; i++) {
+      const [t1, v1] = POWER_FLICKER[i];
+      if (t >= t1) continue;
+      const [t0, v0] = POWER_FLICKER[i - 1];
+      return v0 + ((v1 - v0) * (t - t0)) / (t1 - t0);
+    }
+    return 1;
+  }
+
   private render(): void {
     const ctx = this.ctx;
     const { level, world } = this;
@@ -720,7 +749,9 @@ export class Game {
     ctx.translate(-cx, -cy);
     ctx.drawImage(this.mapCanvas, 0, 0);
     this.particles.drawDecals(ctx);
-    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time));
+    const light = this.roomLight();
+    drawLamps(ctx, level.lights, 0);
+    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time, world.power));
     level.windows.forEach((w, i) => drawWindow(ctx, w, world.windows[i]));
     for (const z of world.zombies) drawZombie(ctx, z, this.fxOf(z.id), world.round.n);
     // The local player on top of teammates.
@@ -729,10 +760,11 @@ export class Game {
     this.particles.draw(ctx);
     ctx.restore();
 
-    this.lighting.draw(ctx, level, world, (id) => this.playerFxOf(id), cx, cy);
+    this.lighting.draw(ctx, level, world, (id) => this.playerFxOf(id), cx, cy, light);
 
     ctx.save();
     ctx.translate(-cx, -cy);
+    if (light > 0) drawLamps(ctx, level.lights, light);
     this.particles.drawGlow(ctx);
     drawPowerUps(ctx, world.powerUps.drops, this.time);
     level.fixtures.forEach((f, i) => drawInteractableOverlay(ctx, f, world.interactables[i], this.time));

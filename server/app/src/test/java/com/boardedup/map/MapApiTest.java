@@ -43,17 +43,17 @@ class MapApiTest {
         return new Res(res.statusCode(), res.body().isEmpty() ? null : json.readTree(res.body()));
     }
 
-    /** The cabin map, renamed to a fresh id so tests don't disturb the seeded copy. */
-    private String cabinAs(String id, String name) throws Exception {
-        String raw = new ClassPathResource("maps/cabin.json").getContentAsString(StandardCharsets.UTF_8);
-        return raw.replace("\"id\": \"cabin\"", "\"id\": \"" + id + "\"").replace("\"The Cabin\"", "\"" + name + "\"");
+    /** The farmstead map, renamed to a fresh id so tests don't disturb the seeded copy. */
+    private String farmsteadAs(String id, String name) throws Exception {
+        String raw = new ClassPathResource("maps/farmstead.json").getContentAsString(StandardCharsets.UTF_8);
+        return raw.replace("\"id\": \"farmstead\"", "\"id\": \"" + id + "\"").replace("\"The Farmstead\"", "\"" + name + "\"");
     }
 
     @Test
     void seedsRepoMaps() throws Exception {
         Res list = call("GET", "/api/maps", null, null);
         assertThat(list.status()).isEqualTo(200);
-        assertThat(list.body().findValuesAsString("id")).contains("house", "cabin");
+        assertThat(list.body().findValuesAsString("id")).contains("house", "farmstead");
 
         Res house = call("GET", "/api/maps/house", null, null);
         assertThat(house.status()).isEqualTo(200);
@@ -66,33 +66,33 @@ class MapApiTest {
 
     @Test
     void uploadsNeedTheAdminToken() throws Exception {
-        String doc = cabinAs("shed", "Shed");
+        String doc = farmsteadAs("shed", "Shed");
         assertThat(call("PUT", "/api/maps/shed", null, doc).status()).isEqualTo(403);
         assertThat(call("PUT", "/api/maps/shed", "wrong", doc).status()).isEqualTo(403);
     }
 
     @Test
     void uploadCreatesThenVersionsOnlyOnChange() throws Exception {
-        Res first = call("PUT", "/api/maps/barn", "test-admin", cabinAs("barn", "Barn"));
+        Res first = call("PUT", "/api/maps/barn", "test-admin", farmsteadAs("barn", "Barn"));
         assertThat(first.status()).isEqualTo(200);
         assertThat(first.body().get("version").asInt()).isEqualTo(1);
 
-        Res same = call("PUT", "/api/maps/barn", "test-admin", cabinAs("barn", "Barn"));
+        Res same = call("PUT", "/api/maps/barn", "test-admin", farmsteadAs("barn", "Barn"));
         assertThat(same.body().get("version").asInt()).isEqualTo(1);
 
-        Res renamed = call("PUT", "/api/maps/barn", "test-admin", cabinAs("barn", "Big Barn"));
+        Res renamed = call("PUT", "/api/maps/barn", "test-admin", farmsteadAs("barn", "Big Barn"));
         assertThat(renamed.body().get("version").asInt()).isEqualTo(2);
         assertThat(call("GET", "/api/maps/barn", null, null).body().get("name").asString()).isEqualTo("Big Barn");
     }
 
     @Test
     void invalidUploadsListTheProblems() throws Exception {
-        String broken = cabinAs("broken", "Broken").replace("\"weapon\":\"shotgun\"", "\"weapon\":\"bazooka\"");
+        String broken = farmsteadAs("broken", "Broken").replace("\"weapon\":\"shotgun\"", "\"weapon\":\"bazooka\"");
         Res r = call("PUT", "/api/maps/broken", "test-admin", broken);
         assertThat(r.status()).isEqualTo(400);
         assertThat(r.body().get("problems").toString()).contains("bazooka");
 
-        assertThat(call("PUT", "/api/maps/other", "test-admin", cabinAs("broken", "X")).status()).isEqualTo(400);
+        assertThat(call("PUT", "/api/maps/other", "test-admin", farmsteadAs("broken", "X")).status()).isEqualTo(400);
         assertThat(call("PUT", "/api/maps/junk", "test-admin", "{not json").status()).isEqualTo(400);
     }
 }

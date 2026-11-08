@@ -32,7 +32,7 @@ class SimParityTest {
             expected = new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().filter(l -> !l.startsWith("#")).toList();
         }
         List<String> actual = new ArrayList<>();
-        for (String map : List.of("house", "cabin")) {
+        for (String map : List.of("house", "farmstead")) {
             GameSim s = GameSimTest.solo(map, SEED);
             for (int i = 0; i < TICKS && !s.over; i++) {
                 s.step(DT, GameSimTest.bot(s));

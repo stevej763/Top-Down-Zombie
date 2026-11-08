@@ -11,7 +11,7 @@ import java.util.Set;
 
 /** Buyable things. The client draws and prompts for them by {@link Kind} (view/Level.ts {@code Fixture}). */
 public abstract sealed class Interactable {
-    public enum Kind { WALL_BUY, PERK, ARMOUR, UPGRADE, BOX, DOOR }
+    public enum Kind { WALL_BUY, PERK, ARMOUR, UPGRADE, BOX, DOOR, POWER }
 
     public double standX;
     public double standY;
@@ -26,6 +26,11 @@ public abstract sealed class Interactable {
     /** Whether pressing E here does anything for this player right now (affordability aside). */
     public boolean usable(GameSim sim, Player p) {
         return true;
+    }
+
+    /** Only works once the power is on (see {@link GameSim#power}). */
+    public boolean needsPower() {
+        return false;
     }
 
     public abstract void use(GameSim sim, Player p);
@@ -83,6 +88,8 @@ public abstract sealed class Interactable {
 
         @Override public Kind kind() { return Kind.PERK; }
 
+        @Override public boolean needsPower() { return true; }
+
         @Override
         public void use(GameSim sim, Player p) {
             if (p.perks.contains(perk.id()) || !pay(sim, p, perk.cost())) return;
@@ -123,6 +130,8 @@ public abstract sealed class Interactable {
 
         @Override public Kind kind() { return Kind.UPGRADE; }
 
+        @Override public boolean needsPower() { return true; }
+
         @Override
         public void use(GameSim sim, Player p) {
             Weapon w = p.weapon();
@@ -158,6 +167,8 @@ public abstract sealed class Interactable {
         }
 
         @Override public Kind kind() { return Kind.BOX; }
+
+        @Override public boolean needsPower() { return true; }
 
         @Override
         public boolean usable(GameSim sim, Player p) {
@@ -242,6 +253,25 @@ public abstract sealed class Interactable {
         public void use(GameSim sim, Player p) {
             if (open || !pay(sim, p, def.cost())) return;
             sim.openDoor(this);
+        }
+    }
+
+    /** Free to throw; turns the power on for everyone. */
+    public static final class PowerSwitch extends WallMounted {
+        public PowerSwitch(WallSpot spot) {
+            super(spot);
+        }
+
+        @Override public Kind kind() { return Kind.POWER; }
+
+        @Override
+        public boolean usable(GameSim sim, Player p) {
+            return !sim.power;
+        }
+
+        @Override
+        public void use(GameSim sim, Player p) {
+            sim.turnOnPower(p);
         }
     }
 }

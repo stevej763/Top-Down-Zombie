@@ -28,7 +28,13 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
     ? `${rounds.remaining} zombies left`
     : `${rounds.n > 0 ? 'Next round' : 'Get ready'} in ${Math.ceil(rounds.intermission)}`;
   shadowText(ctx, status, 26, 90, '14px monospace', '#c8c8c8', 'left', 'top');
-  if (game.room && !game.room.solo) shadowText(ctx, `Room ${game.room.code}`, 26, 110, '13px monospace', '#8a8a8a', 'left', 'top');
+  let line = 110;
+  if (game.room && !game.room.solo) {
+    shadowText(ctx, `Room ${game.room.code}`, 26, line, '13px monospace', '#8a8a8a', 'left', 'top');
+    line += 18;
+  }
+  // Until someone finds the switch, say why the machines are dead.
+  if (!world.power) shadowText(ctx, 'Power off', 26, line, '13px monospace', '#c0a040', 'left', 'top');
   drawTeammates(ctx, game);
 
   // Points, health, armour and perks, bottom-left.

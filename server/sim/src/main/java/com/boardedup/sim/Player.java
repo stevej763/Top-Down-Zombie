@@ -196,7 +196,10 @@ public final class Player extends Body {
             // Primed so the first plank goes up quickly after pressing E.
             rebuildTimer = REBUILD_INTERVAL * 0.6;
         }
-        if (best instanceof Interaction.Use u && inp.interactPressed()) u.target().use(sim, this);
+        // Unpowered machines still get a prompt (so players learn they need power) but do nothing.
+        if (best instanceof Interaction.Use u && inp.interactPressed() && (sim.power || !u.target().needsPower())) {
+            u.target().use(sim, this);
+        }
     }
 
     private Interaction findInteraction(GameSim sim) {

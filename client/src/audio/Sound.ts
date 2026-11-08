@@ -291,6 +291,14 @@ class Sound {
     this.noise({ dur: 0.4, freq: 600, gain: 0.4, delay: 0.1 });
   }
 
+  /** A breaker clunk, then the hum of everything spinning up and the tubes ticking on. */
+  powerOn(): void {
+    this.noise({ dur: 0.18, freq: 350, gain: 0.7 });
+    this.tone({ freq: 70, to: 40, dur: 0.15, gain: 0.5, type: 'square' });
+    this.tone({ freq: 45, to: 120, dur: 1.6, gain: 0.16, type: 'sawtooth', delay: 0.15 });
+    [0.12, 0.5, 0.8].forEach((d) => this.tone({ freq: 2600, dur: 0.04, gain: 0.05, type: 'square', delay: d }));
+  }
+
   perk(): void {
     [523, 659, 784, 1047].forEach((f, i) => this.tone({ freq: f, dur: 0.18, gain: 0.18, type: 'triangle', delay: i * 0.09 }));
   }

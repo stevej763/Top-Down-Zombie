@@ -226,6 +226,7 @@ public final class MapValidator {
             });
             spots.put("armour", m.armour());
             spots.put("upgrade", m.upgrade());
+            if (m.power() != null) spots.put("power switch", m.power());
             spots.forEach((what, s) -> {
                 if (at(s.tx(), s.ty()) != '#') err(what + ": must be on a wall tile");
                 if (Math.abs(s.nx()) + Math.abs(s.ny()) != 1) err(what + ": (nx, ny) must be one step along an axis");

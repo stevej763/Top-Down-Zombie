@@ -8,12 +8,14 @@ import type { PerkId, PowerUpId, WeaponId } from '../game/defs';
  */
 export interface WorldView {
   round: RoundView;
+  /** Whether the box, perks and upgrade bench work; on maps with a power switch, also the lights. */
+  power: boolean;
   powerUps: PowerUpsView;
   players: PlayerView[];
   zombies: ZombieView[];
   /** Plank count per window, in map order (`Level.windows`). */
   windows: WindowView[];
-  /** In `Level.fixtures` order: wall buys, perks, armour, upgrade, box, doors. */
+  /** In `Level.fixtures` order: wall buys, perks, armour, upgrade, box, doors, power switch. */
   interactables: InteractableView[];
 }
 

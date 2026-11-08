@@ -59,8 +59,14 @@ function hexToRgb(hex: string): string {
   return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
 }
 
+/** Kinds that stay dark and do nothing until the power is on. */
+export function needsPower(kind: Fixture['kind']): boolean {
+  return kind === 'perk' || kind === 'upgrade' || kind === 'box';
+}
+
 /** Coloured light an interactable casts in the dark ("r, g, b"), if any. */
-export function glowOf(it: Fixture): string | null {
+export function glowOf(it: Fixture, powered: boolean): string | null {
+  if (!powered && needsPower(it.kind)) return null;
   switch (it.kind) {
     case 'wallBuy': return '200, 200, 190';
     case 'perk': return hexToRgb(PERK_VISUALS[it.perk].color);
@@ -68,6 +74,8 @@ export function glowOf(it: Fixture): string | null {
     case 'upgrade': return '170, 80, 230';
     case 'box': return '240, 190, 70';
     case 'door': return null;
+    // A red light to find it by in the dark, green once thrown.
+    case 'power': return powered ? '90, 220, 120' : '230, 60, 40';
   }
 }
 

@@ -28,11 +28,23 @@ export function interactionPrompt(level: Level, world: WorldView, p: PlayerView)
       return { text: `Hold E to revive ${name}`, color: WHITE };
     }
     case 'use':
-      return prompt(p, level.fixtures[it.target], world.interactables[it.target]);
+      return prompt(p, level.fixtures[it.target], world.interactables[it.target], world.power);
   }
 }
 
-function prompt(p: PlayerView, f: Fixture, s: InteractableView): Prompt | null {
+/** What a machine is called when it's waiting for the power. */
+function unpoweredName(f: Fixture): string | null {
+  switch (f.kind) {
+    case 'perk': return PERKS[f.perk].name;
+    case 'upgrade': return 'Upgrade bench';
+    case 'box': return 'Mystery box';
+    default: return null;
+  }
+}
+
+function prompt(p: PlayerView, f: Fixture, s: InteractableView, powered: boolean): Prompt | null {
+  const dead = powered ? null : unpoweredName(f);
+  if (dead) return { text: `${dead} — needs power`, color: GREY };
   switch (f.kind) {
     case 'wallBuy': {
       const def = WEAPONS[f.weapon];
@@ -70,5 +82,7 @@ function prompt(p: PlayerView, f: Fixture, s: InteractableView): Prompt | null {
     }
     case 'door':
       return s.open ? null : priced(p, 'Press E to open door', f.def.cost);
+    case 'power':
+      return powered ? null : { text: 'Press E to turn on the power', color: WHITE };
   }
 }

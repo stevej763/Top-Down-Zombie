@@ -16,12 +16,14 @@ public record Snapshot(
         long tick,
         Map<Integer, Integer> acks,
         RoundView round,
+        /** Whether the box, perks and upgrade bench work (and, on maps with a power switch, the lights are on). */
+        boolean power,
         PowerUpsView powerUps,
         List<PlayerView> players,
         List<ZombieView> zombies,
         /** Plank counts, in map order. */
         List<Integer> windows,
-        /** In GameSim order: wall buys, perks, armour, upgrade, box, doors. */
+        /** In GameSim order: wall buys, perks, armour, upgrade, box, doors, then the power switch if the map has one. */
         List<InteractableView> interactables) implements ServerMessage {
 
     public record RoundView(int n, boolean active, int remaining, double intermission) {}

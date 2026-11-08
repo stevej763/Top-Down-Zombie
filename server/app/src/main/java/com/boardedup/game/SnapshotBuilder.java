@@ -33,7 +33,7 @@ final class SnapshotBuilder {
         var zombies = sim.zombies.stream().map(SnapshotBuilder::zombie).toList();
         var windows = sim.barricades.stream().map(b -> b.planks).toList();
         var interactables = sim.interactables.stream().map(SnapshotBuilder::interactable).toList();
-        return new Snapshot(tick, acks, round, powerUps, players, zombies, windows, interactables);
+        return new Snapshot(tick, acks, round, sim.power, powerUps, players, zombies, windows, interactables);
     }
 
     private static PlayerView player(GameSim sim, Player p) {

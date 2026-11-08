@@ -58,6 +58,8 @@ export interface MapDoc {
   upgrade: WallSpot;
   /** Left tile of the 2-tile mystery box; it's used from the tile row below. */
   box: { tx: number; ty: number };
+  /** Optional. With one, the box, perks and upgrade bench need the power on, and the buildings have lights. */
+  power?: WallSpot | null;
 }
 
 export interface MapData {
@@ -71,6 +73,7 @@ export interface MapData {
   upgrade: WallSpot;
   box: { tx: number; ty: number };
   doors: DoorDef[];
+  power: WallSpot | null;
   startRoom: RoomId;
   playerStart: Vec2;
 }
@@ -94,6 +97,7 @@ export function parseMap(doc: MapDoc): MapData {
     upgrade: { ...doc.upgrade },
     box: { ...doc.box },
     doors: doc.doors.map((d) => ({ ...d, tiles: d.tiles.map(([x, y]) => [x, y] as [number, number]) })),
+    power: doc.power ? { ...doc.power } : null,
     startRoom: doc.startRoom,
     playerStart: { x: doc.playerStart.tx * TILE + TILE / 2, y: doc.playerStart.ty * TILE + TILE / 2 },
   };
