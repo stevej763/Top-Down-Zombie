@@ -1,4 +1,4 @@
-import { ensureRegistered } from './api';
+import { ensureRegistered, loadIdentity } from './api';
 import type { ClientMessage, ServerMessage } from './protocol';
 
 export type LinkStatus = 'idle' | 'connecting' | 'open' | 'reconnecting';
@@ -85,7 +85,7 @@ export class Connection implements Link {
     const id = await ensureRegistered(this.verify);
     if (!this.wanted || generation !== this.generation) return;
     if (!id?.token) {
-      this.problem = id ? "Can't reach the server" : 'Pick a name first';
+      this.problem = loadIdentity() ? "Can't reach the server" : 'Pick a name first';
       this.retry();
       return;
     }

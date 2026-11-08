@@ -10,6 +10,11 @@ spring:
     hibernate:
       ddl-auto: validate
 
+server:
+  # nginx sends X-Forwarded-Proto/Host. Without them, behind TLS the browser's https Origin doesn't
+  # match the http request and Spring rejects POSTs and the /ws handshake as cross-origin.
+  forward-headers-strategy: framework
+
 management:
   endpoints:
     web:
