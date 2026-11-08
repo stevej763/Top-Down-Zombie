@@ -20,6 +20,7 @@ class LobbyServiceTest {
     final LobbyService lobby = new LobbyService(
             id -> id.equals("house") ? Optional.of(new LobbyService.RoomMap(FakeConnection.map("house"), 1)) : Optional.empty(),
             (_, _, _, results) -> results.stream().map(_ -> 0).toList(),
+            Runnable::run,
             tick -> {
                 ticks.add(tick);
                 return () -> stopped++;
@@ -113,6 +114,17 @@ class LobbyServiceTest {
         String solo = create(b, true);
         assertThat(join(a, solo)).isNotNull();
         assertThat(lobby.roomOf(a.account()).orElseThrow().code).isEqualTo(mine);
+    }
+
+    @Test
+    void joiningAFullRoomKeepsYourSeat() {
+        Client a = client("A");
+        String mine = create(a, false);
+        String full = create(client("Host"), false);
+        for (int i = 0; i < 3; i++) join(client("P" + i), full);
+        assertThat(join(a, full)).contains("full");
+        assertThat(lobby.roomOf(a.account()).orElseThrow().code).isEqualTo(mine);
+        assertThat(lobby.room(mine).orElseThrow().memberCount()).isEqualTo(1);
     }
 
     @Test

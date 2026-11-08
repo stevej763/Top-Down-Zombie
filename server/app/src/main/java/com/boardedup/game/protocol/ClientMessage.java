@@ -13,6 +13,7 @@ import java.util.List;
         @JsonSubTypes.Type(value = ClientMessage.Start.class, name = "start"),
         @JsonSubTypes.Type(value = ClientMessage.Input.class, name = "input"),
         @JsonSubTypes.Type(value = ClientMessage.Leave.class, name = "leave"),
+        @JsonSubTypes.Type(value = ClientMessage.Pause.class, name = "pause"),
         @JsonSubTypes.Type(value = ClientMessage.Ping.class, name = "ping"),
 })
 public sealed interface ClientMessage {
@@ -30,6 +31,9 @@ public sealed interface ClientMessage {
     record Input(List<ClientInput> inputs) implements ClientMessage {}
 
     record Leave() implements ClientMessage {}
+
+    /** Solo only: the sim stops while paused. Co-op rooms ignore it. */
+    record Pause(boolean paused) implements ClientMessage {}
 
     /** {@code t} is the client's clock, echoed back in the pong. */
     record Ping(double t) implements ClientMessage {}

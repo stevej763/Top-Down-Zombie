@@ -40,7 +40,7 @@ const RESUME_TIMEOUT = 3;
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover';
 
-/** The room we're in. `solo` is what we asked for; the server's `welcome` doesn't say. */
+/** The room we're in, from the server's `welcome`. */
 export interface RoomInfo {
   code: string;
   mapId: string;
@@ -78,7 +78,7 @@ export class Game {
   /** The finished game, for the game-over screen. */
   result: GameOverInfo | null = null;
   private net: NetGame | null = null;
-  /** What the last create/join asked for, so `welcome` knows if it's solo. */
+  /** What the last create/join asked for; set means a room may exist on the server even before `welcome`. */
   private asked: 'solo' | 'coop' | 'join' | null = null;
   /** `link.opens` when the room last welcomed us; a higher count means we reconnected. */
   private roomOpens = 0;
@@ -226,10 +226,17 @@ export class Game {
   pause(): void {
     this.state = 'paused';
     this.menu.open('pause');
+    this.sendPause();
   }
 
   resume(): void {
     this.state = 'playing';
+    this.sendPause();
+  }
+
+  /** Solo games stop on the server while paused; co-op plays on, so there's nothing to send. */
+  private sendPause(): void {
+    if (this.room?.solo && this.link.status === 'open') this.link.send({ type: 'pause', paused: this.state === 'paused' });
   }
 
   start(): void {
@@ -282,7 +289,7 @@ export class Game {
         }
         break;
       case 'start':
-        this.gameStarted(m.tick);
+        this.gameStarted(m.tick, m.seq);
         break;
       case 'snapshot':
         if (this.state === 'playing' || this.state === 'paused') this.net?.snapshot(m, this.time);
@@ -311,7 +318,7 @@ export class Game {
     this.you = m.you.playerId;
     // The same room again: a reconnect. The server follows with `start` if the game is still on.
     if (this.room?.code === m.room.code) return;
-    this.room = { code: m.room.code, mapId: m.room.mapId, solo: this.asked === 'solo', doc: m.map };
+    this.room = { code: m.room.code, mapId: m.room.mapId, solo: m.room.solo, doc: m.map };
     this.lobby = null;
     this.setLevel(buildLevel(m.map));
     this.scores.show(m.room.mapId);
@@ -325,22 +332,26 @@ export class Game {
     this.menu.showLobby();
   }
 
-  private gameStarted(tick: number): void {
+  private gameStarted(tick: number, seq: number): void {
     const room = this.room;
     if (!room) return;
     const running = this.state === 'playing' || this.state === 'paused';
     if (running && this.net && tick > 0) {
-      this.net.restart(true);
+      this.net.resume(seq);
+      // The server may have kept (or lost) a solo pause across the reconnect; tell it which.
+      this.sendPause();
       return;
     }
     // A fresh level each game: the last one's doors were opened in its tile map.
     this.setLevel(buildLevel(room.doc));
-    this.net = new NetGame(this.level, this.you);
+    this.net = new NetGame(this.level, this.you, seq);
     this.restarting = false;
     this.result = null;
     this.gameOverTimer = 0;
     this.state = 'playing';
     this.menu.done();
+    // Resuming a game after a reload: the server may still be holding it paused.
+    if (tick > 0) this.sendPause();
   }
 
   private gameOver(m: GameOverInfo): void {
@@ -385,8 +396,8 @@ export class Game {
         this.menu.update(this);
         break;
       case 'paused':
-        // Online, the world keeps going behind the pause menu; you just stand still.
-        this.runNet(dt, { ...NO_INPUT, aim: this.me.aim });
+        // Co-op keeps going behind the pause menu; you just stand still. Solo is stopped on the server.
+        if (!this.room?.solo) this.runNet(dt, { ...NO_INPUT, aim: this.me.aim });
         if (this.state !== 'paused') break;
         if (inp.wasPressed('KeyP')) this.resume();
         else this.menu.update(this);

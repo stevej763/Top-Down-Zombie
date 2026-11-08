@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,15 +52,20 @@ public final class GameRoom {
     /** Inputs beyond this are ignored outright; only a broken or hostile client gets here. */
     static final int MAX_BUFFERED = 120;
     static final Duration GRACE = Duration.ofSeconds(30);
+    /** How long a finished game waits for its scores to save before showing the results without ranks. */
+    static final Duration SCORE_WAIT = Duration.ofSeconds(3);
 
     static final class Member {
         final UUID account;
         final int id;
         final String name;
         boolean ready;
-        Connection conn;
+        /** Volatile because {@link #input} checks it outside the lock. */
+        volatile Connection conn;
         Instant disconnectedAt;
         final ConcurrentLinkedQueue<ClientInput> inputs = new ConcurrentLinkedQueue<>();
+        /** {@code inputs.size()} walks the queue, so its length is counted here. */
+        final AtomicInteger queued = new AtomicInteger();
         /** The input applied last tick, presses included; idle ticks reuse it without the presses. */
         PlayerInput last = PlayerInput.NONE;
         int lastSeq;
@@ -77,6 +84,8 @@ public final class GameRoom {
     public final boolean solo;
     private final MapDoc map;
     private final ScoreRecorder scores;
+    /** Runs score writes, so a slow database never holds up the tick. */
+    private final Executor background;
     private final InstantSource clock;
     private final LongSupplier seeds;
     private final Listener listener;
@@ -89,15 +98,34 @@ public final class GameRoom {
     private GameSim sim;
     private long tick;
     private int partySize;
+    /** Solo only: the player paused, so the sim waits. */
+    private boolean paused;
+    /** Set from game over until the results go out; the sim is frozen meanwhile. */
+    private Finishing finishing;
 
-    public GameRoom(String code, MapDoc map, int mapVersion, boolean solo, ScoreRecorder scores, InstantSource clock,
-            LongSupplier seeds, Listener listener) {
+    /** A finished game waiting for its scores; {@code ranks} is set from the background thread. */
+    private static final class Finishing {
+        final int round;
+        final List<Player> players;
+        final Instant deadline;
+        volatile List<Integer> ranks;
+
+        Finishing(int round, List<Player> players, Instant deadline) {
+            this.round = round;
+            this.players = players;
+            this.deadline = deadline;
+        }
+    }
+
+    public GameRoom(String code, MapDoc map, int mapVersion, boolean solo, ScoreRecorder scores, Executor background,
+            InstantSource clock, LongSupplier seeds, Listener listener) {
         this.code = code;
         this.mapId = map.id();
         this.map = map;
         this.mapVersion = mapVersion;
         this.solo = solo;
         this.scores = scores;
+        this.background = background;
         this.clock = clock;
         this.seeds = seeds;
         this.listener = listener;
@@ -131,9 +159,11 @@ public final class GameRoom {
         Connection old = m.conn;
         m.conn = conn;
         m.disconnectedAt = null;
+        // Inputs still queued came from the old socket; the new one carries on after the last applied.
+        clearInputs(m);
         conn.send(welcome(m));
         broadcast(lobby());
-        if (state == State.PLAYING) conn.send(new ServerMessage.Start(tick));
+        if (state == State.PLAYING) conn.send(new ServerMessage.Start(tick, m.lastSeq));
         if (old != null && old != conn) old.close();
     }
 
@@ -143,7 +173,7 @@ public final class GameRoom {
         if (m == null || m.conn != conn) return;
         m.conn = null;
         m.disconnectedAt = clock.instant();
-        m.inputs.clear();
+        clearInputs(m);
         m.last = PlayerInput.NONE;
         broadcast(lobby());
     }
@@ -151,6 +181,11 @@ public final class GameRoom {
     public synchronized void leave(UUID account) {
         Member m = members.get(account);
         if (m != null) remove(m);
+    }
+
+    /** Solo rooms stop the sim while paused; co-op ignores it, since the others play on. */
+    public synchronized void pause(UUID account, boolean paused) {
+        if (solo && state == State.PLAYING && members.containsKey(account)) this.paused = paused;
     }
 
     public synchronized String ready(UUID account, boolean ready) {
@@ -173,27 +208,41 @@ public final class GameRoom {
         sim = new GameSim(map, seeds.getAsLong());
         for (Member o : ordered()) {
             sim.addPlayer(o.id, o.name);
-            o.inputs.clear();
+            clearInputs(o);
             o.last = PlayerInput.NONE;
             o.lastSeq = 0;
         }
         partySize = members.size();
         tick = 0;
+        paused = false;
         state = State.PLAYING;
-        broadcast(new ServerMessage.Start(tick));
+        broadcast(new ServerMessage.Start(tick, 0));
         broadcast(lobby());
         return null;
     }
 
-    /** Called from socket threads. Inputs outside a game are dropped. */
-    public void input(UUID account, List<ClientInput> inputs) {
+    /** Called from socket threads. Inputs outside a game, or from a replaced socket, are dropped. */
+    public void input(UUID account, Connection from, List<ClientInput> inputs) {
         Member m = members.get(account);
-        if (m == null || state != State.PLAYING || inputs == null) return;
+        if (m == null || m.conn != from || state != State.PLAYING || inputs == null) return;
         for (ClientInput in : inputs) {
             if (in == null) continue;
-            if (m.inputs.size() >= MAX_BUFFERED) break;
+            if (m.queued.incrementAndGet() > MAX_BUFFERED) {
+                m.queued.decrementAndGet();
+                break;
+            }
             m.inputs.add(in);
         }
+    }
+
+    private static void clearInputs(Member m) {
+        while (m.inputs.poll() != null) m.queued.decrementAndGet();
+    }
+
+    private static ClientInput pollInput(Member m) {
+        ClientInput in = m.inputs.poll();
+        if (in != null) m.queued.decrementAndGet();
+        return in;
     }
 
     private void remove(Member m) {
@@ -225,6 +274,11 @@ public final class GameRoom {
             if (m.conn == null && !now.isBefore(m.disconnectedAt.plus(GRACE))) remove(m);
         }
         if (closed || state != State.PLAYING) return;
+        if (finishing != null) {
+            if (finishing.ranks != null || !now.isBefore(finishing.deadline)) showResults();
+            return;
+        }
+        if (solo && (paused || members.values().stream().allMatch(m -> m.conn == null))) return;
         try {
             stepSim();
         } catch (RuntimeException e) {
@@ -256,12 +310,12 @@ public final class GameRoom {
     /** One input per tick; see {@link #MAX_QUEUED}. */
     private static PlayerInput nextInput(Member m) {
         PlayerInput dropped = null;
-        while (m.inputs.size() > MAX_QUEUED) {
-            ClientInput old = m.inputs.poll();
+        while (m.queued.get() > MAX_QUEUED) {
+            ClientInput old = pollInput(m);
             dropped = dropped == null ? old.toPlayerInput() : mergePresses(dropped, old.toPlayerInput());
             m.lastSeq = old.seq();
         }
-        ClientInput next = m.inputs.poll();
+        ClientInput next = pollInput(m);
         if (next == null) return m.last = held(m.last);
         m.lastSeq = next.seq();
         PlayerInput in = next.toPlayerInput();
@@ -283,34 +337,50 @@ public final class GameRoom {
                 false, -1, false);
     }
 
-    /** Scores, the gameOver message, then back to the lobby. */
+    /** Saves the scores in the background; the next tick after they're saved (or {@link #SCORE_WAIT}) shows the results. */
     private void finish() {
         int round = Math.max(0, sim.rounds.round - 1);
         List<Player> players = List.copyOf(sim.players);
         List<ScoreRecorder.Result> results = new ArrayList<>();
         for (Player p : players) results.add(new ScoreRecorder.Result(accountOf(p.id), p.kills, p.economy.earned));
-        List<Integer> ranks;
-        try {
-            ranks = scores.record(mapId, round, partySize, results);
-        } catch (RuntimeException e) {
-            log.error("Room {}: couldn't save scores", code, e);
-            ranks = players.stream().map(_ -> -1).toList();
-        }
+        Finishing f = new Finishing(round, players, clock.instant().plus(SCORE_WAIT));
+        finishing = f;
+        int party = partySize;
+        background.execute(() -> {
+            List<Integer> ranks;
+            try {
+                ranks = scores.record(mapId, round, party, results);
+            } catch (RuntimeException e) {
+                log.error("Room {}: couldn't save scores", code, e);
+                ranks = players.stream().map(_ -> -1).toList();
+            }
+            f.ranks = ranks;
+        });
+        if (f.ranks != null) showResults(); // the executor ran it inline
+    }
+
+    /** The gameOver message, then back to the lobby. Ranks still unsaved show as -1. */
+    private void showResults() {
+        Finishing f = finishing;
+        List<Integer> ranks = f.ranks;
+        if (ranks == null) log.warn("Room {}: scores not saved after {}; showing results without ranks", code, SCORE_WAIT);
         List<ServerMessage.Result> table = new ArrayList<>();
-        for (int i = 0; i < players.size(); i++) {
-            Player p = players.get(i);
-            table.add(new ServerMessage.Result(p.id, p.name, p.kills, p.economy.earned, ranks.get(i)));
+        for (int i = 0; i < f.players.size(); i++) {
+            Player p = f.players.get(i);
+            table.add(new ServerMessage.Result(p.id, p.name, p.kills, p.economy.earned, ranks == null ? -1 : ranks.get(i)));
         }
-        broadcast(new ServerMessage.GameOver(round, table));
+        broadcast(new ServerMessage.GameOver(f.round, table));
         backToLobby();
     }
 
     private void backToLobby() {
         sim = null;
+        finishing = null;
+        paused = false;
         state = State.LOBBY;
         for (Member m : members.values()) {
             m.ready = false;
-            m.inputs.clear();
+            clearInputs(m);
         }
         broadcast(lobby());
     }
@@ -331,7 +401,7 @@ public final class GameRoom {
     }
 
     private ServerMessage.Welcome welcome(Member m) {
-        return new ServerMessage.Welcome(new ServerMessage.You(m.id, m.name), new ServerMessage.RoomInfo(code, mapId, mapVersion), map);
+        return new ServerMessage.Welcome(new ServerMessage.You(m.id, m.name), new ServerMessage.RoomInfo(code, mapId, mapVersion, solo), map);
     }
 
     private ServerMessage.Lobby lobby() {

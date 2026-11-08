@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +51,11 @@ class GameRoomTest {
     final FakeConnection bobConn = new FakeConnection();
 
     GameRoom room(boolean solo) {
-        return new GameRoom("ABCD", FakeConnection.map("house"), 3, solo, scores, clock, () -> 42, listener);
+        return room(solo, Runnable::run);
+    }
+
+    GameRoom room(boolean solo, Executor background) {
+        return new GameRoom("ABCD", FakeConnection.map("house"), 3, solo, scores, background, clock, () -> 42, listener);
     }
 
     /** A solo room in play, with zombies held off. */
@@ -94,7 +99,7 @@ class GameRoomTest {
 
         ServerMessage.Welcome w = bobConn.last(ServerMessage.Welcome.class);
         assertThat(w.you().playerId()).isEqualTo(2);
-        assertThat(w.room()).isEqualTo(new ServerMessage.RoomInfo("ABCD", "house", 3));
+        assertThat(w.room()).isEqualTo(new ServerMessage.RoomInfo("ABCD", "house", 3, false));
         assertThat(w.map().id()).isEqualTo("house");
 
         ServerMessage.Lobby lobby = aliceConn.last(ServerMessage.Lobby.class);
@@ -133,7 +138,7 @@ class GameRoomTest {
     void takesOneInputPerTickAndAcksIt() {
         GameRoom r = soloGame();
         double x0 = first(r).x;
-        r.input(alice, List.of(input(1, b -> b.move(1, 0)), input(2, b -> b.move(1, 0)), input(3, b -> b.move(1, 0))));
+        r.input(alice, aliceConn, List.of(input(1, b -> b.move(1, 0)), input(2, b -> b.move(1, 0)), input(3, b -> b.move(1, 0))));
         r.tick();
         assertThat(first(r).x).isCloseTo(x0 + Player.SPEED * GameRoom.DT, org.assertj.core.data.Offset.offset(1e-9));
         ticks(r, 2);
@@ -143,7 +148,7 @@ class GameRoomTest {
     @Test
     void anEmptyQueueRepeatsTheLastInputWithoutItsPresses() {
         GameRoom r = soloGame();
-        r.input(alice, List.of(input(1, b -> b.move(1, 0).reload())));
+        r.input(alice, aliceConn, List.of(input(1, b -> b.move(1, 0).reload())));
         first(r).weapon().mag = 1;
         r.tick();
         double x1 = first(r).x;
@@ -159,7 +164,7 @@ class GameRoomTest {
         GameRoom r = soloGame();
         List<ClientInput> burst = new ArrayList<>();
         for (int seq = 1; seq <= 10; seq++) burst.add(seq == 2 ? input(seq, b -> b.knife()) : input(seq, _ -> {}));
-        r.input(alice, burst);
+        r.input(alice, aliceConn, burst);
         r.tick();
         // 10 queued, 6 may wait: seq 1-4 are dropped, seq 5 is applied with seq 2's knife press.
         assertThat(aliceConn.last(ServerMessage.Events.class).events()).contains(new SimEvent.Knife(1, false));
@@ -201,7 +206,7 @@ class GameRoomTest {
     void eventsAreBatchedOncePerTick() {
         GameRoom r = soloGame();
         first(r).weapon().mag = 3;
-        r.input(alice, List.of(input(1, b -> b.fire())));
+        r.input(alice, aliceConn, List.of(input(1, b -> b.fire())));
         r.tick();
         List<ServerMessage.Events> events = aliceConn.all(ServerMessage.Events.class);
         assertThat(events).hasSize(1);
@@ -214,7 +219,7 @@ class GameRoomTest {
     @Test
     void aDisconnectedPlayerIdlesThenIsRemovedAfterTheGracePeriod() {
         GameRoom r = duoGame();
-        r.input(bob, List.of(input(1, b -> b.move(1, 0))));
+        r.input(bob, bobConn, List.of(input(1, b -> b.move(1, 0))));
         r.disconnected(bob, bobConn);
         Player b = r.sim().player(2);
         double x = b.x;
@@ -244,7 +249,7 @@ class GameRoomTest {
         assertThat(again.last(ServerMessage.Start.class).tick()).isEqualTo(10);
 
         clock.advance(Duration.ofSeconds(60));
-        r.input(bob, List.of(input(1, b -> b.move(0, 1))));
+        r.input(bob, again, List.of(input(1, b -> b.move(0, 1))));
         double y = r.sim().player(2).y;
         r.tick();
         assertThat(r.sim().player(2).y).isGreaterThan(y);
@@ -324,12 +329,104 @@ class GameRoomTest {
     void aFailedScoreWriteStillEndsTheGame() {
         GameRoom r = new GameRoom("ABCD", FakeConnection.map("house"), 1, true, (_, _, _, _) -> {
             throw new IllegalStateException("db down");
-        }, clock, () -> 1, listener);
+        }, Runnable::run, clock, () -> 1, listener);
         r.join(alice, "Alice", aliceConn);
         r.start(alice);
         r.sim().damagePlayer(r.sim().players.getFirst(), 1e6);
         r.tick();
         assertThat(aliceConn.last(ServerMessage.GameOver.class).players().getFirst().rank()).isEqualTo(-1);
         assertThat(r.state()).isEqualTo(GameRoom.State.LOBBY);
+    }
+
+    @Test
+    void aSlowScoreWriteFreezesTheGameUntilItsDone() {
+        List<Runnable> pending = new ArrayList<>();
+        GameRoom r = room(true, pending::add);
+        r.join(alice, "Alice", aliceConn);
+        r.start(alice);
+        r.sim().damagePlayer(r.sim().players.getFirst(), 1e6);
+        r.tick();
+        long frozenAt = r.currentTick();
+        r.tick();
+        assertThat(r.currentTick()).isEqualTo(frozenAt);
+        assertThat(aliceConn.last(ServerMessage.GameOver.class)).isNull();
+        assertThat(r.state()).isEqualTo(GameRoom.State.PLAYING);
+        assertThat(r.start(alice)).isNotNull();
+
+        pending.forEach(Runnable::run);
+        r.tick();
+        assertThat(aliceConn.last(ServerMessage.GameOver.class).players().getFirst().rank()).isEqualTo(7);
+        assertThat(r.state()).isEqualTo(GameRoom.State.LOBBY);
+    }
+
+    @Test
+    void scoresThatNeverSaveShowTheResultsWithoutRanks() {
+        List<Runnable> pending = new ArrayList<>();
+        GameRoom r = room(true, pending::add);
+        r.join(alice, "Alice", aliceConn);
+        r.start(alice);
+        r.sim().damagePlayer(r.sim().players.getFirst(), 1e6);
+        r.tick();
+        clock.advance(GameRoom.SCORE_WAIT);
+        r.tick();
+        assertThat(aliceConn.last(ServerMessage.GameOver.class).players().getFirst().rank()).isEqualTo(-1);
+        assertThat(r.state()).isEqualTo(GameRoom.State.LOBBY);
+
+        // The late write changes nothing.
+        pending.forEach(Runnable::run);
+        r.tick();
+        assertThat(aliceConn.all(ServerMessage.GameOver.class)).hasSize(1);
+    }
+
+    @Test
+    void resumingCarriesOnFromTheLastAppliedSeqAndIgnoresTheOldSocket() {
+        GameRoom r = duoGame();
+        r.input(bob, bobConn, List.of(input(41, b -> b.move(1, 0)), input(42, b -> b.move(1, 0))));
+        ticks(r, 2);
+        FakeConnection tab2 = new FakeConnection();
+        r.reconnect(bob, tab2);
+        assertThat(tab2.last(ServerMessage.Start.class).seq()).isEqualTo(42);
+
+        // A late input from the replaced socket doesn't count.
+        r.input(bob, bobConn, List.of(input(43, b -> b.move(0, 1))));
+        double y = r.sim().player(2).y;
+        ticks(r, 3);
+        assertThat(r.sim().player(2).y).isEqualTo(y);
+        assertThat(tab2.last(Snapshot.class).acks()).containsEntry(2, 42);
+    }
+
+    @Test
+    void soloPauseStopsTheSim() {
+        GameRoom r = room(true);
+        r.join(alice, "Alice", aliceConn);
+        r.start(alice);
+        ticks(r, 3);
+        r.pause(alice, true);
+        ticks(r, 30);
+        assertThat(r.currentTick()).isEqualTo(3);
+        r.pause(alice, false);
+        ticks(r, 3);
+        assertThat(r.currentTick()).isEqualTo(6);
+    }
+
+    @Test
+    void soloWaitsWhileDisconnected() {
+        GameRoom r = room(true);
+        r.join(alice, "Alice", aliceConn);
+        r.start(alice);
+        r.disconnected(alice, aliceConn);
+        ticks(r, 10);
+        assertThat(r.currentTick()).isZero();
+        r.reconnect(alice, new FakeConnection());
+        ticks(r, 10);
+        assertThat(r.currentTick()).isEqualTo(10);
+    }
+
+    @Test
+    void coopIgnoresPause() {
+        GameRoom r = duoGame();
+        r.pause(alice, true);
+        ticks(r, 5);
+        assertThat(r.currentTick()).isEqualTo(5);
     }
 }

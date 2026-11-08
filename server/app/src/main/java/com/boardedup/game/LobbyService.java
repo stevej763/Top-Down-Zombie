@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +38,7 @@ public class LobbyService implements GameRoom.Listener {
 
     private final Function<String, Optional<RoomMap>> maps;
     private final ScoreRecorder scores;
+    private final Executor background;
     private final Ticker ticker;
     private final InstantSource clock;
     private final LongSupplier seeds;
@@ -47,13 +50,15 @@ public class LobbyService implements GameRoom.Listener {
 
     @Autowired
     public LobbyService(MapService maps, ScoreRecorder scores, Ticker ticker, InstantSource clock) {
-        this(id -> maps.find(id).map(m -> new RoomMap(maps.parse(m.getData()), m.getVersion())), scores, ticker, clock, null);
+        this(id -> maps.find(id).map(m -> new RoomMap(maps.parse(m.getData()), m.getVersion())), scores,
+                Executors.newVirtualThreadPerTaskExecutor(), ticker, clock, null);
     }
 
-    LobbyService(Function<String, Optional<RoomMap>> maps, ScoreRecorder scores, Ticker ticker, InstantSource clock,
-            LongSupplier seeds) {
+    LobbyService(Function<String, Optional<RoomMap>> maps, ScoreRecorder scores, Executor background, Ticker ticker,
+            InstantSource clock, LongSupplier seeds) {
         this.maps = maps;
         this.scores = scores;
+        this.background = background;
         this.ticker = ticker;
         this.clock = clock;
         this.seeds = seeds != null ? seeds : random::nextLong;
@@ -64,7 +69,7 @@ public class LobbyService implements GameRoom.Listener {
         Optional<RoomMap> map = mapId == null ? Optional.empty() : maps.apply(mapId);
         if (map.isEmpty()) return "No map " + mapId;
         leave(account);
-        GameRoom room = new GameRoom(newCode(), map.get().doc(), map.get().version(), solo, scores, clock, seeds, this);
+        GameRoom room = new GameRoom(newCode(), map.get().doc(), map.get().version(), solo, scores, background, clock, seeds, this);
         rooms.put(room.code, room);
         stoppers.put(room, ticker.start(room::tick));
         room.join(account, name, conn);
@@ -77,13 +82,13 @@ public class LobbyService implements GameRoom.Listener {
         GameRoom room = code == null ? null : rooms.get(code.trim().toUpperCase(Locale.ROOT));
         if (room == null) return "No room " + code;
         if (roomOf.get(account) == room) return "Already in this room";
-        // Check before leaving the current room, so a failed join doesn't cost the player their seat.
-        if (room.solo) return "That's a solo game";
-        if (room.state() != GameRoom.State.LOBBY) return "That game has already started";
-        leave(account);
+        // Join before leaving the current room, so a failed join (full, solo, started) doesn't cost the player their seat.
+        GameRoom old = roomOf.get(account);
         String error = room.join(account, name, conn);
-        if (error == null) roomOf.put(account, room);
-        return error;
+        if (error != null) return error;
+        if (old != null) old.leave(account);
+        roomOf.put(account, room);
+        return null;
     }
 
     public void leave(UUID account) {

@@ -12,7 +12,7 @@ import type { WorldView } from '../view/WorldView';
 
 // ----------------------------------------------------------------- client → server
 
-/** One client tick of input. Seqs start at 1 for each game; snapshots ack the last one applied. */
+/** One client tick of input. Seqs carry on from `start.seq`; snapshots ack the last one applied. */
 export interface ClientInput extends PlayerInput {
   seq: number;
 }
@@ -27,6 +27,8 @@ export type ClientMessage =
   /** Usually one input; send several to catch up after a stall. */
   | { type: 'input'; inputs: ClientInput[] }
   | { type: 'leave' }
+  /** Solo only: the server stops the game while paused. Co-op rooms ignore it. */
+  | { type: 'pause'; paused: boolean }
   | { type: 'ping'; t: number };
 
 // ----------------------------------------------------------------- server → client
@@ -49,10 +51,11 @@ export interface GameResult {
 
 export type ServerMessage =
   /** On joining a room, and on reconnecting to one. */
-  | { type: 'welcome'; you: { playerId: number; name: string }; room: { code: string; mapId: string; mapVersion: number }; map: MapDoc }
+  | { type: 'welcome'; you: { playerId: number; name: string }; room: { code: string; mapId: string; mapVersion: number; solo: boolean }; map: MapDoc }
   /** The room's members, whenever they change. */
   | { type: 'lobby'; code: string; state: 'lobby' | 'playing'; ownerId: number; players: LobbyPlayer[] }
-  | { type: 'start'; tick: number }
+  /** `seq` is the last input seq the server applied for you: 0 for a new game, more when resuming one. */
+  | { type: 'start'; tick: number; seq: number }
   | Snapshot
   /** Everything the sim emitted during one tick. */
   | { type: 'events'; tick: number; events: NetEvent[] }

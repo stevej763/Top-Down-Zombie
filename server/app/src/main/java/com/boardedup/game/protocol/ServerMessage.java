@@ -15,7 +15,7 @@ import java.util.List;
 public interface ServerMessage {
     record You(int playerId, String name) {}
 
-    record RoomInfo(String code, String mapId, int mapVersion) {}
+    record RoomInfo(String code, String mapId, int mapVersion, boolean solo) {}
 
     /** Sent on joining a room and on reconnecting to one. */
     @JsonTypeName("welcome")
@@ -27,8 +27,9 @@ public interface ServerMessage {
     @JsonTypeName("lobby")
     record Lobby(String code, String state, int ownerId, List<LobbyPlayer> players) implements ServerMessage {}
 
+    /** {@code seq} is the last input seq applied for you: 0 for a new game, more when resuming one. */
     @JsonTypeName("start")
-    record Start(long tick) implements ServerMessage {}
+    record Start(long tick, int seq) implements ServerMessage {}
 
     /** Everything the sim emitted during one tick. */
     @JsonTypeName("events")

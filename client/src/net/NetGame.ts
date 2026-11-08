@@ -29,7 +29,6 @@ const CLOCK_RESET = 0.5;
  * against each snapshot, and corrections are smoothed. Aim is always local.
  */
 export class NetGame {
-  private seq = 0;
   private pending: ClientInput[] = [];
   private snapshots: Snapshot[] = [];
   /** Server time minus local time, in seconds, smoothed. */
@@ -41,16 +40,20 @@ export class NetGame {
   private correction = { x: 0, y: 0 };
   private aim = 0;
 
-  constructor(private readonly level: Level, readonly you: number) {}
+  /** `seq` is the last input the server applied for us (from `start`); ours carry on after it. */
+  constructor(private readonly level: Level, readonly you: number, private seq: number) {}
 
   /** The newest snapshot, or null before the first. */
   get latest(): Snapshot | null {
     return this.snapshots[this.snapshots.length - 1] ?? null;
   }
 
-  /** A new game (seqs restart at 1) or, with `resume`, the same game after a reconnect. */
-  restart(resume: boolean): void {
-    if (!resume) this.seq = 0;
+  /**
+   * The same game after a reconnect. Seqs never go below what the server has applied, or its acks
+   * would cover every new input and reconciliation would drop them all.
+   */
+  resume(serverSeq: number): void {
+    this.seq = Math.max(this.seq, serverSeq);
     this.pending = [];
     this.snapshots = [];
     this.clockSet = false;
