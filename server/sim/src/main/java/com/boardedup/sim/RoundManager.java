@@ -4,7 +4,11 @@ import java.util.List;
 
 /** Round flow and difficulty curves: port of client/src/sim/RoundManager.ts. */
 public final class RoundManager {
+    /** Zombies alive at once in a solo game; each extra player adds MAX_ALIVE_PER_PLAYER. */
     public static final int MAX_ALIVE = 24;
+    private static final int MAX_ALIVE_PER_PLAYER = 6;
+    /** Each extra player adds this fraction of the solo zombie count. */
+    private static final double COUNT_PER_PLAYER = 0.5;
     private static final double INTERMISSION = 10;
     private static final double FIRST_ROUND_DELAY = 3;
 
@@ -22,6 +26,15 @@ public final class RoundManager {
 
     public static int zombieCount(int r) {
         return r < 10 ? 6 + 3 * (r - 1) : 30 + 5 * (r - 9);
+    }
+
+    /** Zombies in round {@code r} for a party of {@code n}. */
+    public static int zombieCount(int r, int n) {
+        return (int) Math.round(zombieCount(r) * (1 + COUNT_PER_PLAYER * (n - 1)));
+    }
+
+    public static int maxAlive(int n) {
+        return MAX_ALIVE + MAX_ALIVE_PER_PLAYER * (n - 1);
     }
 
     public static double runnerChance(int r) {
@@ -58,7 +71,7 @@ public final class RoundManager {
         }
 
         spawnTimer -= dt;
-        if (toSpawn > 0 && spawnTimer <= 0 && game.zombies.size() < MAX_ALIVE) {
+        if (toSpawn > 0 && spawnTimer <= 0 && game.zombies.size() < maxAlive(game.partySize())) {
             spawn(game);
             toSpawn--;
             spawnTimer = spawnInterval(round) * game.rng.range(0.7, 1.3);
@@ -74,11 +87,12 @@ public final class RoundManager {
     private void startRound(GameSim game) {
         round++;
         active = true;
-        toSpawn = zombieCount(round);
+        toSpawn = zombieCount(round, game.partySize());
         spawnTimer = 0.5;
-        game.economy.resetRound();
+        for (Player p : game.players) p.economy.resetRound();
         game.powerUps.resetRound();
         game.emit(new SimEvent.RoundStart(round));
+        game.respawnDead();
     }
 
     private void spawn(GameSim game) {

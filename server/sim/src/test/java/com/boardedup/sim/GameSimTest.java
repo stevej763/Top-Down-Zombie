@@ -28,9 +28,20 @@ class GameSimTest {
         return TestMaps.load(id);
     }
 
+    /** A one-player sim, like the TS sim. */
+    static GameSim solo(String map, long seed) {
+        GameSim s = new GameSim(doc(map), seed);
+        s.addPlayer(1, "solo");
+        return s;
+    }
+
+    private static Player player(GameSim s) {
+        return s.players.getFirst();
+    }
+
     /** A sim with no zombies coming. */
     private static GameSim quiet() {
-        GameSim s = new GameSim(doc("house"), 1);
+        GameSim s = solo("house", 1);
         s.rounds.intermission = 1e9;
         return s;
     }
@@ -46,8 +57,8 @@ class GameSimTest {
     }
 
     private static void standAt(GameSim s, double x, double y) {
-        s.player.x = x;
-        s.player.y = y;
+        player(s).x = x;
+        player(s).y = y;
     }
 
     private static Zombie zombie(GameSim s, double x, double y, double hp) {
@@ -69,7 +80,10 @@ class GameSimTest {
 
     /** Shoots the nearest zombie it can see, knifes close ones, rebuilds windows when idle. */
     static PlayerInput bot(GameSim s) {
-        Player p = s.player;
+        return bot(s, player(s));
+    }
+
+    static PlayerInput bot(GameSim s, Player p) {
         Zombie target = null;
         double best = Double.POSITIVE_INFINITY;
         for (Zombie z : s.zombies) {
@@ -105,13 +119,13 @@ class GameSimTest {
     }
 
     private static String summary(GameSim s) {
-        return "%.3f r%d k%d p%d hp%.3f x%.3f z=%s planks=%s".formatted(s.time, s.rounds.round, s.kills, s.economy.points, s.player.hp,
-                s.player.x, s.zombies.stream().map(z -> "%d:%.3f,%.3f,%.3f".formatted(z.id, z.x, z.y, z.hp)).collect(Collectors.joining(";")),
+        return "%.3f r%d k%d p%d hp%.3f x%.3f z=%s planks=%s".formatted(s.time, s.rounds.round, s.kills, player(s).economy.points, player(s).hp,
+                player(s).x, s.zombies.stream().map(z -> "%d:%.3f,%.3f,%.3f".formatted(z.id, z.x, z.y, z.hp)).collect(Collectors.joining(";")),
                 s.barricades.stream().map(b -> String.valueOf(b.planks)).collect(Collectors.joining(",")));
     }
 
     private static String run(long seed) {
-        GameSim s = new GameSim(doc("house"), seed);
+        GameSim s = solo("house", seed);
         for (int i = 0; i < 60 * 120 && !s.over; i++) {
             s.step(DT, bot(s));
             s.events.clear();
@@ -128,7 +142,7 @@ class GameSimTest {
     @ParameterizedTest
     @ValueSource(strings = {"house", "cabin"})
     void botSurvivesTheFirstRound(String map) {
-        GameSim s = new GameSim(doc(map), 7);
+        GameSim s = solo(map, 7);
         for (int i = 0; i < 60 * 600 && !s.over && s.rounds.round < 6; i++) {
             s.step(DT, bot(s));
             s.events.clear();
@@ -150,11 +164,11 @@ class GameSimTest {
         assertThat(door.open).isFalse();
         assertThat(emitted(s, SimEvent.Denied.class)).isTrue();
 
-        s.economy.points = 5000;
+        player(s).economy.points = 5000;
         press(s, PlayerInput.Builder::interact);
         assertThat(door.open).isTrue();
         assertThat(s.openRooms).contains("tr");
-        assertThat(s.economy.points).isEqualTo(5000 - door.def.cost());
+        assertThat(player(s).economy.points).isEqualTo(5000 - door.def.cost());
         assertThat(s.map.get(door.def.tiles().getFirst().get(0), door.def.tiles().getFirst().get(1))).isEqualTo(Tile.FLOOR);
     }
 
@@ -162,21 +176,21 @@ class GameSimTest {
     void perksAndSecondWind() {
         GameSim s = quiet();
         PerkMachine m = find(s, PerkMachine.class, p -> p.perk.id().equals("secondWind"));
-        s.economy.points = 5000;
+        player(s).economy.points = 5000;
         standAt(s, m.standX, m.standY);
         press(s, PlayerInput.Builder::interact);
-        assertThat(s.player.perks).containsExactly("secondWind");
-        assertThat(s.economy.points).isEqualTo(5000 - m.perk.cost());
+        assertThat(player(s).perks).containsExactly("secondWind");
+        assertThat(player(s).economy.points).isEqualTo(5000 - m.perk.cost());
 
-        s.player.hp = 5;
-        s.damagePlayer(1000);
+        player(s).hp = 5;
+        s.damagePlayer(player(s), 1000);
         assertThat(s.over).isFalse();
-        assertThat(s.player.hp).isEqualTo(s.player.maxHp());
-        assertThat(s.player.perks).isEmpty();
-        assertThat(s.player.invuln).isPositive();
+        assertThat(player(s).hp).isEqualTo(player(s).maxHp());
+        assertThat(player(s).perks).isEmpty();
+        assertThat(player(s).invuln).isPositive();
 
-        s.player.invuln = 0;
-        s.damagePlayer(1000);
+        player(s).invuln = 0;
+        s.damagePlayer(player(s), 1000);
         assertThat(s.over).isTrue();
         assertThat(emitted(s, SimEvent.GameOver.class)).isTrue();
     }
@@ -186,11 +200,11 @@ class GameSimTest {
         GameSim s = quiet();
         s.openDoor(find(s, Door.class, d -> d.def.rooms().contains("bl")));
         PerkMachine m = find(s, PerkMachine.class, p -> p.perk.id().equals("toughHide"));
-        s.economy.points = 5000;
+        player(s).economy.points = 5000;
         standAt(s, m.standX, m.standY);
         press(s, PlayerInput.Builder::interact);
-        assertThat(s.player.maxHp()).isEqualTo(250);
-        assertThat(s.player.hp).isEqualTo(250);
+        assertThat(player(s).maxHp()).isEqualTo(250);
+        assertThat(player(s).hp).isEqualTo(250);
     }
 
     @Test
@@ -198,41 +212,41 @@ class GameSimTest {
         GameSim s = quiet();
         s.openDoor(find(s, Door.class, d -> d.def.rooms().contains("bl")));
         ArmourBench bench = find(s, ArmourBench.class, b -> true);
-        s.economy.points = 10000;
+        player(s).economy.points = 10000;
         standAt(s, bench.standX, bench.standY);
         press(s, PlayerInput.Builder::interact);
-        assertThat(s.player.armourLevel).isEqualTo(1);
-        assertThat(s.player.armour).isEqualTo(50);
+        assertThat(player(s).armourLevel).isEqualTo(1);
+        assertThat(player(s).armour).isEqualTo(50);
 
-        s.damagePlayer(50);
-        assertThat(s.player.hp).isCloseTo(85, within(1e-9));
-        assertThat(s.player.armour).isCloseTo(15, within(1e-9));
+        s.damagePlayer(player(s), 50);
+        assertThat(player(s).hp).isCloseTo(85, within(1e-9));
+        assertThat(player(s).armour).isCloseTo(15, within(1e-9));
 
         press(s, PlayerInput.Builder::interact);
-        assertThat(s.player.armour).isEqualTo(50);
-        assertThat(s.player.armourLevel).isEqualTo(1);
+        assertThat(player(s).armour).isEqualTo(50);
+        assertThat(player(s).armourLevel).isEqualTo(1);
     }
 
     @Test
     void upgradeBench() {
         GameSim s = quiet();
         UpgradeBench bench = find(s, UpgradeBench.class, b -> true);
-        s.economy.points = 20000;
+        player(s).economy.points = 20000;
         standAt(s, bench.standX, bench.standY);
         press(s, PlayerInput.Builder::interact);
-        Weapon w = s.player.weapon();
+        Weapon w = player(s).weapon();
         assertThat(w.tier).isEqualTo(1);
         assertThat(w.name()).isEqualTo("Pistol Mk II");
         assertThat(w.damage()).isEqualTo(25 * 1.75);
         assertThat(w.mag).isEqualTo(12);
-        assertThat(s.economy.points).isEqualTo(20000 - 3000);
+        assertThat(player(s).economy.points).isEqualTo(20000 - 3000);
     }
 
     @Test
     void mysteryBoxRollsAndOffersAWeaponYouDontHave() {
         GameSim s = quiet();
         MysteryBox box = find(s, MysteryBox.class, b -> true);
-        s.economy.points = 5000;
+        player(s).economy.points = 5000;
         standAt(s, box.standX, box.standY);
         press(s, PlayerInput.Builder::interact);
         assertThat(box.state).isEqualTo(MysteryBox.State.ROLLING);
@@ -241,42 +255,42 @@ class GameSimTest {
         assertThat(box.shown).isNotEqualTo("pistol");
         String shown = box.shown;
         press(s, PlayerInput.Builder::interact);
-        assertThat(s.player.weapons[1].def.id()).isEqualTo(shown);
-        assertThat(s.player.slot).isEqualTo(1);
+        assertThat(player(s).weapons[1].def.id()).isEqualTo(shown);
+        assertThat(player(s).slot).isEqualTo(1);
     }
 
     @Test
     void powerUps() {
         GameSim s = quiet();
-        Weapon w = s.player.weapon();
+        Weapon w = player(s).weapon();
         w.mag = 0;
         w.reserve = 0;
-        s.applyPowerUp("ammo");
+        s.applyPowerUp(player(s), "ammo");
         assertThat(w.isFull()).isTrue();
 
-        s.applyPowerUp("double");
+        s.applyPowerUp(player(s), "double");
         idle(s, 1);
-        int before = s.economy.points;
-        zombie(s, s.player.x + 60, s.player.y, 1000);
+        int before = player(s).economy.points;
+        zombie(s, player(s).x + 60, player(s).y, 1000);
         press(s, b -> b.aim(0).fire());
-        assertThat(s.economy.points - before).isEqualTo(20);
+        assertThat(player(s).economy.points - before).isEqualTo(20);
 
-        s.applyPowerUp("instakill");
+        s.applyPowerUp(player(s), "instakill");
         idle(s, 30);
         press(s, b -> b.aim(0).fire());
         assertThat(s.zombies).isEmpty();
         assertThat(s.kills).isEqualTo(1);
 
         List<Zombie> zs = List.of(zombie(s, 100, 100, 1000), zombie(s, 200, 200, 1000));
-        s.applyPowerUp("nuke");
+        s.applyPowerUp(player(s), "nuke");
         assertThat(zs).allMatch(z -> z.dead);
     }
 
     @Test
     void plasmaSplashHitsACluster() {
         GameSim s = quiet();
-        s.giveWeapon(new Weapon(s.defs, s.defs.weapon("plasma")));
-        Player p = s.player;
+        s.giveWeapon(player(s), new Weapon(s.defs, s.defs.weapon("plasma")));
+        Player p = player(s);
         List<Zombie> zs = List.of(zombie(s, p.x + 100, p.y, 1000), zombie(s, p.x + 100, p.y + 30, 1000), zombie(s, p.x + 100, p.y - 30, 1000));
         press(s, b -> b.aim(0).fire());
         assertThat(zs).allMatch(z -> z.hp < 1000);
@@ -286,11 +300,11 @@ class GameSimTest {
     @Test
     void knife() {
         GameSim s = quiet();
-        Player p = s.player;
+        Player p = player(s);
         Zombie z = zombie(s, p.x + 30, p.y, 100);
         press(s, b -> b.aim(0).knife());
         assertThat(z.dead).isTrue();
-        assertThat(s.economy.points).isEqualTo(500 + 130);
+        assertThat(player(s).economy.points).isEqualTo(500 + 130);
 
         Zombie behind = zombie(s, p.x - 30, p.y, 1000);
         idle(s, 60);
@@ -312,17 +326,17 @@ class GameSimTest {
         b.planks = 0;
         for (int i = 0; i < 60 * 4; i++) press(s, PlayerInput.Builder::interactHeld);
         assertThat(b.planks).isEqualTo(Barricade.MAX_PLANKS);
-        assertThat(s.economy.points).isEqualTo(500 + Barricade.MAX_PLANKS * 10);
+        assertThat(player(s).economy.points).isEqualTo(500 + Barricade.MAX_PLANKS * 10);
 
-        s.economy.rebuildLeft = 0;
+        player(s).economy.rebuildLeft = 0;
         b.planks = 0;
         for (int i = 0; i < 60 * 4; i++) press(s, PlayerInput.Builder::interactHeld);
-        assertThat(s.economy.points).isEqualTo(500 + Barricade.MAX_PLANKS * 10);
+        assertThat(player(s).economy.points).isEqualTo(500 + Barricade.MAX_PLANKS * 10);
     }
 
     @Test
     void zombiesBreakInAndHurtAnIdlePlayer() {
-        GameSim s = new GameSim(doc("house"), 3);
+        GameSim s = solo("house", 3);
         int ticks = 0;
         boolean torn = false, hurt = false;
         while (!s.over && ticks++ < 60 * 120) {

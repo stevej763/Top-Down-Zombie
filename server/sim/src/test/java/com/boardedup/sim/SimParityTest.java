@@ -29,7 +29,7 @@ class SimParityTest {
         }
         List<String> actual = new ArrayList<>();
         for (String map : List.of("house", "cabin")) {
-            GameSim s = new GameSim(TestMaps.load(map), SEED);
+            GameSim s = GameSimTest.solo(map, SEED);
             for (int i = 0; i < TICKS && !s.over; i++) {
                 s.step(DT, GameSimTest.bot(s));
                 s.events.clear();
@@ -46,7 +46,8 @@ class SimParityTest {
 
     /** Must match the format in client/scripts/parity.ts. */
     private static String line(GameSim s) {
-        return "r%d k%d p%d hp%.6f x%.6f y%.6f z=%s".formatted(s.rounds.round, s.kills, s.economy.points, s.player.hp, s.player.x, s.player.y,
+        Player p = s.players.getFirst();
+        return "r%d k%d p%d hp%.6f x%.6f y%.6f z=%s".formatted(s.rounds.round, s.kills, p.economy.points, p.hp, p.x, p.y,
                 s.zombies.stream().map(z -> "%d:%.6f,%.6f,%.3f".formatted(z.id, z.x, z.y, z.hp)).collect(Collectors.joining(";")));
     }
 }

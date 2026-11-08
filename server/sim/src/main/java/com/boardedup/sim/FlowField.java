@@ -1,9 +1,10 @@
 package com.boardedup.sim;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.function.IntPredicate;
 
-/** BFS distance field over passable tiles, rooted at the player's tile. */
+/** BFS distance field over passable tiles, rooted at the living players' tiles. */
 public final class FlowField {
     private static final int[][] DIRS = {
         {1, 0}, {-1, 0}, {0, 1}, {0, -1},
@@ -13,8 +14,8 @@ public final class FlowField {
     private final TileMap map;
     private final IntPredicate passable;
     private final int[] dist;
-    private int originTx = -1;
-    private int originTy = -1;
+    /** Source tiles (tx, ty pairs, possibly off the grid) of the last computed field; null forces a recompute. */
+    private int[] origins;
 
     public FlowField(TileMap map, IntPredicate passable) {
         this.map = map;
@@ -24,24 +25,30 @@ public final class FlowField {
 
     /** Force a recompute on the next update (e.g. after a door opens). */
     public void invalidate() {
-        originTx = -1;
+        origins = null;
     }
 
-    public void update(double px, double py) {
-        int tx = (int) Math.floor(px / TileMap.TILE);
-        int ty = (int) Math.floor(py / TileMap.TILE);
-        if (tx == originTx && ty == originTy) return;
-        originTx = tx;
-        originTy = ty;
-
+    /** Multi-source BFS from every point's tile (the living players), so each tile leads to the nearest one. */
+    public void update(List<Point> sources) {
         int w = map.w, h = map.h;
+        int[] tiles = new int[sources.size() * 2];
+        for (int i = 0; i < sources.size(); i++) {
+            tiles[i * 2] = (int) Math.floor(sources.get(i).x() / TileMap.TILE);
+            tiles[i * 2 + 1] = (int) Math.floor(sources.get(i).y() / TileMap.TILE);
+        }
+        if (Arrays.equals(tiles, origins)) return;
+        origins = tiles;
+
         Arrays.fill(dist, -1);
-        // The player can be pushed briefly off the grid's floor; there's nothing to root then.
-        if (tx < 0 || ty < 0 || tx >= w || ty >= h) return;
         int[] queue = new int[w * h];
         int head = 0, tail = 0;
-        dist[ty * w + tx] = 0;
-        queue[tail++] = ty * w + tx;
+        for (int i = 0; i < tiles.length; i += 2) {
+            int tx = tiles[i], ty = tiles[i + 1];
+            // A player can be pushed briefly off the grid's floor; there's nothing to root then.
+            if (tx < 0 || ty < 0 || tx >= w || ty >= h || dist[ty * w + tx] == 0) continue;
+            dist[ty * w + tx] = 0;
+            queue[tail++] = ty * w + tx;
+        }
         while (head < tail) {
             int i = queue[head++];
             int cx = i % w;
@@ -58,7 +65,7 @@ public final class FlowField {
         }
     }
 
-    /** Centre of the neighbouring tile that leads toward the player, or null if already there / unreachable. */
+    /** Centre of the neighbouring tile that leads toward the nearest player, or null if already there / unreachable. */
     public Point nextTarget(double x, double y) {
         int tx = (int) Math.floor(x / TileMap.TILE);
         int ty = (int) Math.floor(y / TileMap.TILE);

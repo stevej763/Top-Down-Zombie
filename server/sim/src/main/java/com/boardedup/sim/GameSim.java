@@ -11,14 +11,18 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * The whole game simulation: world state plus {@link #step}. A port of client/src/sim/GameSim.ts;
- * keep the two in step. Not thread-safe: one thread steps a sim.
+ * keep the two in step. Co-op (more than one player) is Java only: with one player it behaves
+ * exactly like the TS sim. Not thread-safe: one thread steps a sim.
  */
 public final class GameSim {
     private static final String TILE_CHARS = "._#WCD";
+    /** Distance from the start tile's centre for every player after the first. */
+    private static final double SPAWN_RING = 28;
 
     public final Defs defs;
     public final String mapId;
@@ -26,19 +30,22 @@ public final class GameSim {
     public final List<Barricade> barricades;
     public final List<Interactable> interactables = new ArrayList<>();
     public final Set<String> openRooms = new HashSet<>();
-    public final Player player;
+    /** In join order; the first one spawns exactly on the map's start. */
+    public final List<Player> players = new ArrayList<>();
     public final List<Zombie> zombies = new ArrayList<>();
     public final RoundManager rounds = new RoundManager();
     public final FlowField flow;
-    public final Economy economy;
     public final PowerUps powerUps = new PowerUps();
     public final Rng rng;
+    /** Every player's kills together. */
     public int kills;
     public double time;
     public boolean over;
     /** Filled during {@link #step}; the caller takes and clears it. */
     public final List<SimEvent> events = new ArrayList<>();
     private int lastId;
+    private final double startX;
+    private final double startY;
 
     public GameSim(MapDoc doc, long seed) {
         this(Defs.standard(), doc, seed);
@@ -69,10 +76,68 @@ public final class GameSim {
         for (var d : doc.doors()) interactables.add(new Door(d));
         openRooms.add(doc.startRoom());
         double t = TileMap.TILE;
-        this.player = new Player(defs, doc.playerStart().tx() * t + t / 2, doc.playerStart().ty() * t + t / 2);
+        this.startX = doc.playerStart().tx() * t + t / 2;
+        this.startY = doc.playerStart().ty() * t + t / 2;
         this.flow = new FlowField(map, tile -> tile == Tile.FLOOR);
-        this.economy = new Economy(defs);
         this.rng = new Rng(seed);
+    }
+
+    // --------------------------------------------------------------- players
+
+    /** Add a player at the start (before the game starts). Ids are chosen by the caller and must be unique. */
+    public Player addPlayer(int id, String name) {
+        if (player(id) != null) throw new IllegalArgumentException("Duplicate player id " + id);
+        Player p = new Player(defs, id, name, startX, startY);
+        players.add(p);
+        placeAtStart(p);
+        return p;
+    }
+
+    public void removePlayer(int id) {
+        if (!players.removeIf(p -> p.id == id)) return;
+        checkGameOver();
+    }
+
+    public Player player(int id) {
+        for (Player p : players) if (p.id == id) return p;
+        return null;
+    }
+
+    public int partySize() {
+        return players.size();
+    }
+
+    /** Downed/revive only applies with more than one player. */
+    public boolean coop() {
+        return players.size() > 1;
+    }
+
+    /** The closest player who is up (zombies ignore downed and dead ones), or null. */
+    public Player nearestAlivePlayer(double x, double y) {
+        Player best = null;
+        double bestD = Double.POSITIVE_INFINITY;
+        for (Player p : players) {
+            if (!p.alive()) continue;
+            double d = SimMath.dist(x, y, p.x, p.y);
+            if (d < bestD) {
+                best = p;
+                bestD = d;
+            }
+        }
+        return best;
+    }
+
+    /** The first player stands on the start tile; the rest on a ring around it, pushed out of walls. */
+    private void placeAtStart(Player p) {
+        int i = players.indexOf(p);
+        p.x = startX;
+        p.y = startY;
+        if (i > 0) {
+            double a = (i - 1) * SimMath.TAU / 3;
+            p.x += Math.cos(a) * SPAWN_RING;
+            p.y += Math.sin(a) * SPAWN_RING;
+        }
+        map.collideCircle(p, Player.RADIUS, t -> t != Tile.FLOOR);
     }
 
     public void emit(SimEvent e) {
@@ -83,13 +148,24 @@ public final class GameSim {
         return ++lastId;
     }
 
+    /** Solo and tests: step with this input for the only player. */
     public void step(double dt, PlayerInput input) {
+        if (players.size() != 1) throw new IllegalStateException("step(dt, input) needs exactly one player, not " + players.size());
+        step(dt, Map.of(players.getFirst().id, input));
+    }
+
+    /** Advance the world; players missing from {@code inputs} idle. */
+    public void step(double dt, Map<Integer, PlayerInput> inputs) {
         if (over) return;
         time += dt;
-        economy.multiplier = powerUps.doublePoints > 0 ? 2 : 1;
+        int multiplier = powerUps.doublePoints > 0 ? 2 : 1;
+        for (Player p : players) p.economy.multiplier = multiplier;
 
-        player.update(dt, input, this);
-        flow.update(player.x, player.y);
+        for (Player p : players) p.update(dt, inputs.getOrDefault(p.id, PlayerInput.NONE), this);
+        updateDowned(dt);
+        List<Point> sources = new ArrayList<>();
+        for (Player p : players) if (p.alive()) sources.add(new Point(p.x, p.y));
+        flow.update(sources);
         rounds.update(dt, this);
         for (Interactable it : interactables) it.update(dt, this);
         for (Zombie z : zombies) z.update(dt, this);
@@ -98,7 +174,7 @@ public final class GameSim {
         powerUps.update(dt, this);
     }
 
-    /** Push overlapping zombies apart, and the player out of zombies. */
+    /** Push overlapping zombies apart, and players who are up out of zombies. */
     private void separate() {
         List<Zombie> zs = zombies;
         double minD = Zombie.RADIUS * 2;
@@ -121,22 +197,23 @@ public final class GameSim {
             }
         }
 
-        Player p = player;
         double minPD = Zombie.RADIUS + Player.RADIUS;
-        for (Zombie z : zs) {
-            if (z.state != Zombie.State.INSIDE) continue;
-            double dx = p.x - z.x;
-            double dy = p.y - z.y;
-            double d = Math.hypot(dx, dy);
-            if (d >= minPD || d == 0) continue;
-            double overlap = minPD - d;
-            p.x += (dx / d) * overlap * 0.7;
-            p.y += (dy / d) * overlap * 0.7;
-            z.x -= (dx / d) * overlap * 0.3;
-            z.y -= (dy / d) * overlap * 0.3;
+        for (Player p : players) {
+            if (!p.alive()) continue;
+            for (Zombie z : zs) {
+                if (z.state != Zombie.State.INSIDE) continue;
+                double dx = p.x - z.x;
+                double dy = p.y - z.y;
+                double d = Math.hypot(dx, dy);
+                if (d >= minPD || d == 0) continue;
+                double overlap = minPD - d;
+                p.x += (dx / d) * overlap * 0.7;
+                p.y += (dy / d) * overlap * 0.7;
+                z.x -= (dx / d) * overlap * 0.3;
+                z.y -= (dy / d) * overlap * 0.3;
+            }
+            map.collideCircle(p, Player.RADIUS, t -> t != Tile.FLOOR);
         }
-
-        map.collideCircle(p, Player.RADIUS, t -> t != Tile.FLOOR);
         for (Zombie z : zs) {
             if (z.state != Zombie.State.CLIMBING) map.collideCircle(z, Zombie.RADIUS, z.solid());
         }
@@ -144,23 +221,22 @@ public final class GameSim {
 
     // --------------------------------------------------------------- actions
 
-    void fire(Weapon w) {
-        Player p = player;
+    void fire(Player p, Weapon w) {
         Defs.WeaponDef def = w.def;
         w.mag--;
         w.cooldown = def.fireInterval() * p.fireIntervalMult();
 
         double base = AimAssist.apply(this, p.x, p.y, p.aim, def.range());
         for (int i = 0; i < def.pellets(); i++) {
-            traceShot(p.x, p.y, base + rng.range(-def.spread() / 2, def.spread() / 2), w);
+            traceShot(p, p.x, p.y, base + rng.range(-def.spread() / 2, def.spread() / 2), w);
         }
-        emit(new SimEvent.Shot(def.id(), w.tier, p.x, p.y, p.aim));
+        emit(new SimEvent.Shot(p.id, def.id(), w.tier, p.x, p.y, p.aim));
     }
 
     private record Hit(Zombie z, double t) {}
 
-    /** Hitscan from the player's centre. */
-    private void traceShot(double ox, double oy, double angle, Weapon w) {
+    /** Hitscan from the shooter's centre. Teammates don't block shots. */
+    private void traceShot(Player p, double ox, double oy, double angle, Weapon w) {
         Defs.WeaponDef def = w.def;
         double dx = Math.cos(angle);
         double dy = Math.sin(angle);
@@ -181,7 +257,7 @@ public final class GameSim {
             double offset = Math.abs((h.z.x - ox) * dy - (h.z.y - oy) * dx);
             boolean facingShooter = Math.abs(SimMath.angleDiff(h.z.facing, Math.atan2(oy - h.z.y, ox - h.z.x))) < 1.2;
             boolean head = offset < Zombie.RADIUS * 0.35 && facingShooter;
-            hitZombie(h.z, w.damage(), ox + dx * h.t, oy + dy * h.t, angle, head, head ? defs.points.headshotKill() : defs.points.kill());
+            hitZombie(p, h.z, w.damage(), ox + dx * h.t, oy + dy * h.t, angle, head, head ? defs.points.headshotKill() : defs.points.kill());
             if (--pens <= 0) {
                 end = h.t;
                 break;
@@ -191,13 +267,12 @@ public final class GameSim {
         double ex = ox + dx * end;
         double ey = oy + dy * end;
         boolean hitWall = def.splash() == null && end == wallD && wallD < def.range();
-        emit(new SimEvent.Tracer(def.id(), w.tier, ox, oy, ex, ey, hitWall));
-        if (def.splash() != null) explode(ex, ey, def.splash().radius(), def.splash().damage() * (w.damage() / def.damage()));
+        emit(new SimEvent.Tracer(p.id, def.id(), w.tier, ox, oy, ex, ey, hitWall));
+        if (def.splash() != null) explode(p, ex, ey, def.splash().radius(), def.splash().damage() * (w.damage() / def.damage()));
     }
 
     /** Slash the closest zombie inside the knife arc. */
-    void knife() {
-        Player p = player;
+    void knife(Player p) {
         Defs.Knife k = defs.knife;
         double reach = Player.RADIUS + k.reach() + Zombie.RADIUS;
         Zombie target = null;
@@ -211,69 +286,71 @@ public final class GameSim {
             target = z;
             bestD = d;
         }
-        emit(new SimEvent.Knife(target != null));
+        emit(new SimEvent.Knife(p.id, target != null));
         if (target == null) return;
         double angle = Math.atan2(target.y - p.y, target.x - p.x);
-        hitZombie(target, k.damage(), target.x, target.y, angle, false, defs.points.knifeKill());
+        hitZombie(p, target, k.damage(), target.x, target.y, angle, false, defs.points.knifeKill());
         if (!target.dead && target.state == Zombie.State.INSIDE) {
             target.x += Math.cos(angle) * 8;
             target.y += Math.sin(angle) * 8;
         }
     }
 
-    private void explode(double x, double y, double radius, double damage) {
+    private void explode(Player by, double x, double y, double radius, double damage) {
         for (Zombie z : zombies) {
             if (z.dead) continue;
             double d = SimMath.dist(x, y, z.x, z.y);
             if (d < radius + Zombie.RADIUS) {
-                hitZombie(z, damage * (1 - 0.5 * Math.min(1, d / radius)), z.x, z.y, Math.atan2(z.y - y, z.x - x), false,
+                hitZombie(by, z, damage * (1 - 0.5 * Math.min(1, d / radius)), z.x, z.y, Math.atan2(z.y - y, z.x - x), false,
                         defs.points.kill());
             }
         }
         emit(new SimEvent.Explosion(x, y, radius));
     }
 
-    private void hitZombie(Zombie z, double damage, double hx, double hy, double angle, boolean head, int killPoints) {
+    private void hitZombie(Player by, Zombie z, double damage, double hx, double hy, double angle, boolean head, int killPoints) {
         if (z.dead) return;
         z.hp -= powerUps.instakill > 0 ? z.hp : head ? damage * 1.5 : damage;
         if (z.state == Zombie.State.INSIDE) {
             z.x += Math.cos(angle) * 2;
             z.y += Math.sin(angle) * 2;
         }
-        int points = z.hp <= 0 ? 0 : economy.award(defs.points.hit());
-        emit(new SimEvent.ZombieHit(z.id, hx, hy, angle, points));
-        if (z.hp <= 0) killZombie(z, killPoints);
+        int points = z.hp <= 0 ? 0 : by.economy.award(defs.points.hit());
+        emit(new SimEvent.ZombieHit(by.id, z.id, hx, hy, angle, points));
+        if (z.hp <= 0) killZombie(by, z, killPoints);
     }
 
-    private void killZombie(Zombie z, int points) {
+    /** {@code by} gets the kill and the points (for a Detonation, whoever picked it up). */
+    private void killZombie(Player by, Zombie z, int points) {
         z.dead = true;
         if (z.window.climber == z) z.window.climber = null;
         kills++;
-        int awarded = points > 0 ? economy.award(points) : 0;
-        emit(new SimEvent.ZombieKilled(z.id, z.x, z.y, awarded));
+        by.kills++;
+        int awarded = points > 0 ? by.economy.award(points) : 0;
+        emit(new SimEvent.ZombieKilled(by.id, z.id, z.x, z.y, awarded));
         // Only drop power-ups where the player can reach them.
         if (z.state == Zombie.State.INSIDE) powerUps.maybeDrop(this, z.x, z.y);
     }
 
-    public void applyPowerUp(String id) {
+    /** Timed power-ups apply to everyone; Full Ammo refills everyone; the Detonation bonus goes to every living player. */
+    public void applyPowerUp(Player by, String id) {
         switch (id) {
             case "ammo" -> {
-                for (Weapon w : player.weapons) if (w != null) w.refill();
+                for (Player p : players) for (Weapon w : p.weapons) if (w != null) w.refill();
             }
             case "instakill" -> powerUps.instakill = defs.powerUpTuning.duration();
             case "double" -> powerUps.doublePoints = defs.powerUpTuning.duration();
             case "nuke" -> {
-                for (Zombie z : zombies) if (!z.dead) killZombie(z, 0);
-                economy.award(defs.points.nuke());
+                for (Zombie z : zombies) if (!z.dead) killZombie(by, z, 0);
+                for (Player p : players) if (p.state != Player.State.DEAD) p.economy.award(defs.points.nuke());
             }
             default -> throw new IllegalArgumentException("Unknown power-up " + id);
         }
-        emit(new SimEvent.PowerUp(id));
+        emit(new SimEvent.PowerUp(by.id, id));
     }
 
-    public void damagePlayer(double amount) {
-        Player p = player;
-        if (p.invuln > 0) return;
+    public void damagePlayer(Player p, double amount) {
+        if (!p.alive() || p.invuln > 0) return;
         if (p.armour > 0) {
             double absorbed = Math.min(p.armour, amount * defs.armourAbsorb);
             p.armour -= absorbed;
@@ -281,11 +358,13 @@ public final class GameSim {
         }
         p.hp -= amount;
         p.sinceHit = 0;
-        emit(new SimEvent.PlayerHurt(p.x, p.y));
+        emit(new SimEvent.PlayerHurt(p.id, p.x, p.y));
         if (p.hp > 0) return;
 
         if (p.perks.contains("secondWind")) {
-            secondWind();
+            secondWind(p);
+        } else if (coop()) {
+            down(p);
         } else {
             p.hp = 0;
             over = true;
@@ -294,8 +373,7 @@ public final class GameSim {
     }
 
     /** Get back up: lose every perk, full health, brief invulnerability, zombies shoved back. */
-    private void secondWind() {
-        Player p = player;
+    private void secondWind(Player p) {
         p.perks.clear();
         p.hp = p.maxHp();
         p.invuln = defs.perkEffects.secondWindInvuln();
@@ -308,7 +386,61 @@ public final class GameSim {
                 map.collideCircle(z, Zombie.RADIUS, z.solid());
             }
         }
-        emit(new SimEvent.SecondWind());
+        emit(new SimEvent.SecondWind(p.id));
+    }
+
+    private void down(Player p) {
+        p.hp = 0;
+        p.state = Player.State.DOWNED;
+        p.bleedout = Player.BLEEDOUT;
+        p.reviveProgress = 0;
+        p.weapon().cancelReload();
+        emit(new SimEvent.PlayerDowned(p.id, p.x, p.y));
+        checkGameOver();
+    }
+
+    /** Revives that finished this tick, and bleeding out for the downed nobody is reviving. */
+    private void updateDowned(double dt) {
+        for (Player p : players) {
+            if (p.state != Player.State.DOWNED) continue;
+            if (p.revivedBy >= 0) {
+                if (p.reviveProgress >= Player.REVIVE_TIME) {
+                    p.state = Player.State.ALIVE;
+                    p.hp = p.maxHp() * Player.REVIVE_HP_FRACTION;
+                    p.sinceHit = 0;
+                    p.reviveProgress = 0;
+                    emit(new SimEvent.PlayerRevived(p.id, p.revivedBy));
+                }
+            } else {
+                p.reviveProgress = 0;
+                p.bleedout -= dt;
+                if (p.bleedout <= 0) {
+                    p.state = Player.State.DEAD;
+                    p.bleedout = 0;
+                    emit(new SimEvent.PlayerDied(p.id));
+                }
+            }
+            p.revivedBy = -1;
+        }
+    }
+
+    /** At a round start: the dead come back at the start with the starter loadout. */
+    void respawnDead() {
+        for (Player p : players) {
+            if (p.state != Player.State.DEAD) continue;
+            p.state = Player.State.ALIVE;
+            p.resetLoadout();
+            placeAtStart(p);
+            emit(new SimEvent.PlayerRespawned(p.id, p.x, p.y));
+        }
+    }
+
+    /** Co-op ends when nobody is up. */
+    private void checkGameOver() {
+        if (over || players.isEmpty()) return;
+        for (Player p : players) if (p.alive()) return;
+        over = true;
+        emit(new SimEvent.GameOver());
     }
 
     void tearPlank(Barricade b) {
@@ -316,25 +448,24 @@ public final class GameSim {
         emit(new SimEvent.PlankTorn(b.center.x(), b.center.y()));
     }
 
-    void rebuildPlank(Barricade b) {
+    void rebuildPlank(Player p, Barricade b) {
         if (!b.rebuild()) return;
         int points = 0;
-        if (economy.rebuildLeft >= defs.points.plank()) {
-            economy.rebuildLeft -= defs.points.plank();
-            points = economy.award(defs.points.plank());
+        if (p.economy.rebuildLeft >= defs.points.plank()) {
+            p.economy.rebuildLeft -= defs.points.plank();
+            points = p.economy.award(defs.points.plank());
         }
-        emit(new SimEvent.PlankPlaced(b.center.x(), b.center.y(), points));
+        emit(new SimEvent.PlankPlaced(p.id, b.center.x(), b.center.y(), points));
     }
 
     /** Put a weapon in the empty slot, or replace the one in hand. */
-    public void giveWeapon(Weapon w) {
-        Player p = player;
+    public void giveWeapon(Player p, Weapon w) {
         int empty = p.weapons[0] == null ? 0 : p.weapons[1] == null ? 1 : -1;
         int slot = empty >= 0 ? empty : p.slot;
         p.weapon().cancelReload();
         p.weapons[slot] = w;
         p.slot = slot;
-        emit(new SimEvent.WeaponGiven(w.def.id(), w.tier));
+        emit(new SimEvent.WeaponGiven(p.id, w.def.id(), w.tier));
     }
 
     public void openDoor(Door door) {

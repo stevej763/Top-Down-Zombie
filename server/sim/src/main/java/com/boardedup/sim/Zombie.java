@@ -10,7 +10,7 @@ public final class Zombie extends Body {
     private static final double BREACH_RANGE = 26;
     private static final double ATTACK_WINDUP = 0.45;
     private static final double ATTACK_COOLDOWN = 0.8;
-    /** Close enough with a clear line to walk straight at the player instead of following the flow field. */
+    /** Close enough with a clear line to walk straight at a player instead of following the flow field. */
     private static final double DIRECT_CHASE_RANGE = 180;
 
     static final IntPredicate OUTSIDE_SOLID = t -> t != Tile.OUTSIDE;
@@ -95,14 +95,20 @@ public final class Zombie extends Body {
                 }
             }
             case INSIDE -> {
-                Player p = game.player;
+                Player p = game.nearestAlivePlayer(x, y);
+                if (p == null) {
+                    // Nobody left standing to go after.
+                    attackTimer = attackTimer > 0 ? 0 : Math.min(0, attackTimer + dt);
+                    game.map.collideCircle(this, RADIUS, INSIDE_SOLID);
+                    return;
+                }
                 double dp = SimMath.dist(x, y, p.x, p.y);
                 double reach = RADIUS + Player.RADIUS + 6;
 
                 if (dp < reach) {
                     attackTimer += dt;
                     if (attackTimer >= ATTACK_WINDUP) {
-                        game.damagePlayer(damage);
+                        game.damagePlayer(p, damage);
                         attackTimer = -ATTACK_COOLDOWN;
                     }
                 } else {

@@ -38,14 +38,15 @@ public final class PowerUps {
     void update(double dt, GameSim sim) {
         instakill = Math.max(0, instakill - dt);
         doublePoints = Math.max(0, doublePoints - dt);
-        Player p = sim.player;
         double reach = sim.defs.powerUpTuning.pickupRadius() + Player.RADIUS;
         // Iterate a copy: a nuke picked up here can drop new power-ups (they wait for the next tick).
         for (Drop d : List.copyOf(drops)) {
             d.life -= dt;
-            if (SimMath.dist(d.x, d.y, p.x, p.y) < reach) {
+            for (Player p : sim.players) {
+                if (!p.alive() || SimMath.dist(d.x, d.y, p.x, p.y) >= reach) continue;
                 d.life = 0;
-                sim.applyPowerUp(d.id);
+                sim.applyPowerUp(p, d.id);
+                break;
             }
         }
         drops.removeIf(d -> d.life <= 0);

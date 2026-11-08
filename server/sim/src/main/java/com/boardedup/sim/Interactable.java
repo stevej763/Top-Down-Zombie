@@ -23,19 +23,19 @@ public abstract sealed class Interactable {
         return SimMath.dist(x, y, standX, standY);
     }
 
-    /** Whether pressing E here does anything right now (affordability aside). */
-    public boolean usable(GameSim sim) {
+    /** Whether pressing E here does anything for this player right now (affordability aside). */
+    public boolean usable(GameSim sim, Player p) {
         return true;
     }
 
-    public abstract void use(GameSim sim);
+    public abstract void use(GameSim sim, Player p);
 
     public void update(double dt, GameSim sim) {}
 
     /** Pay for something, or report that the player can't afford it. */
-    static boolean pay(GameSim sim, int cost) {
-        if (sim.economy.spend(cost)) return true;
-        sim.emit(new SimEvent.Denied());
+    static boolean pay(GameSim sim, Player p, int cost) {
+        if (p.economy.spend(cost)) return true;
+        sim.emit(new SimEvent.Denied(p.id));
         return false;
     }
 
@@ -60,16 +60,16 @@ public abstract sealed class Interactable {
         @Override public Kind kind() { return Kind.WALL_BUY; }
 
         @Override
-        public void use(GameSim sim) {
-            Weapon owned = sim.player.findWeapon(def.id());
+        public void use(GameSim sim, Player p) {
+            Weapon owned = p.findWeapon(def.id());
             if (owned != null) {
-                if (owned.isFull() || !pay(sim, owned.ammoCost())) return;
+                if (owned.isFull() || !pay(sim, p, owned.ammoCost())) return;
                 owned.refill();
-                sim.emit(new SimEvent.AmmoBought());
+                sim.emit(new SimEvent.AmmoBought(p.id));
                 return;
             }
-            if (!pay(sim, def.cost())) return;
-            sim.giveWeapon(new Weapon(sim.defs, def));
+            if (!pay(sim, p, def.cost())) return;
+            sim.giveWeapon(p, new Weapon(sim.defs, def));
         }
     }
 
@@ -84,12 +84,11 @@ public abstract sealed class Interactable {
         @Override public Kind kind() { return Kind.PERK; }
 
         @Override
-        public void use(GameSim sim) {
-            Player p = sim.player;
-            if (p.perks.contains(perk.id()) || !pay(sim, perk.cost())) return;
+        public void use(GameSim sim, Player p) {
+            if (p.perks.contains(perk.id()) || !pay(sim, p, perk.cost())) return;
             p.perks.add(perk.id());
             if (perk.id().equals("toughHide")) p.hp = p.maxHp();
-            sim.emit(new SimEvent.PerkBought(perk.id()));
+            sim.emit(new SimEvent.PerkBought(p.id, perk.id()));
         }
     }
 
@@ -101,20 +100,19 @@ public abstract sealed class Interactable {
         @Override public Kind kind() { return Kind.ARMOUR; }
 
         @Override
-        public void use(GameSim sim) {
-            Player p = sim.player;
+        public void use(GameSim sim, Player p) {
             List<ArmourLevel> levels = sim.defs.armourLevels;
             int level = p.armourLevel;
             if (level > 0 && p.armour < levels.get(level).cap()) {
-                if (!pay(sim, sim.defs.repairCost(level))) return;
+                if (!pay(sim, p, sim.defs.repairCost(level))) return;
             } else if (level < levels.size() - 1) {
-                if (!pay(sim, levels.get(level + 1).cost())) return;
+                if (!pay(sim, p, levels.get(level + 1).cost())) return;
                 p.armourLevel++;
             } else {
                 return;
             }
             p.armour = levels.get(p.armourLevel).cap();
-            sim.emit(new SimEvent.ArmourBought(p.armourLevel));
+            sim.emit(new SimEvent.ArmourBought(p.id, p.armourLevel));
         }
     }
 
@@ -126,11 +124,11 @@ public abstract sealed class Interactable {
         @Override public Kind kind() { return Kind.UPGRADE; }
 
         @Override
-        public void use(GameSim sim) {
-            Weapon w = sim.player.weapon();
-            if (w.tier >= sim.defs.maxTier || !pay(sim, sim.defs.upgrade.cost().get(w.tier + 1))) return;
+        public void use(GameSim sim, Player p) {
+            Weapon w = p.weapon();
+            if (w.tier >= sim.defs.maxTier || !pay(sim, p, sim.defs.upgrade.cost().get(w.tier + 1))) return;
             w.upgrade();
-            sim.emit(new SimEvent.Upgraded(w.def.id(), w.tier));
+            sim.emit(new SimEvent.Upgraded(p.id, w.def.id(), w.tier));
         }
     }
 
@@ -147,6 +145,8 @@ public abstract sealed class Interactable {
         public String shown = "shotgun";
         /** Seconds left in the current state (rolling or ready). */
         public double timer;
+        /** Id of the player who paid for the current roll (only they can take it), or -1. */
+        public int owner = -1;
         private double tick;
 
         public MysteryBox(int tx, int ty) {
@@ -160,21 +160,27 @@ public abstract sealed class Interactable {
         @Override public Kind kind() { return Kind.BOX; }
 
         @Override
-        public boolean usable(GameSim sim) {
-            return state != State.ROLLING;
+        public boolean usable(GameSim sim, Player p) {
+            return state == State.CLOSED || (state == State.READY && p.id == owner);
         }
 
         @Override
-        public void use(GameSim sim) {
+        public void use(GameSim sim, Player p) {
             if (state == State.CLOSED) {
-                if (!pay(sim, sim.defs.boxCost)) return;
+                if (!pay(sim, p, sim.defs.boxCost)) return;
                 state = State.ROLLING;
+                owner = p.id;
                 timer = ROLL_TIME;
                 tick = 0;
-            } else if (state == State.READY) {
-                sim.giveWeapon(new Weapon(sim.defs, sim.defs.weapon(shown)));
-                state = State.CLOSED;
+            } else if (state == State.READY && p.id == owner) {
+                sim.giveWeapon(p, new Weapon(sim.defs, sim.defs.weapon(shown)));
+                close();
             }
+        }
+
+        private void close() {
+            state = State.CLOSED;
+            owner = -1;
         }
 
         @Override
@@ -191,14 +197,15 @@ public abstract sealed class Interactable {
                 }
                 if (timer <= 0) {
                     Set<String> held = new HashSet<>();
-                    for (Weapon w : sim.player.weapons) if (w != null) held.add(w.def.id());
+                    Player p = sim.player(owner);
+                    if (p != null) for (Weapon w : p.weapons) if (w != null) held.add(w.def.id());
                     shown = sim.rng.pick(sim.defs.boxPool.stream().filter(id -> !held.contains(id)).toList());
                     state = State.READY;
                     timer = OFFER_TIME;
                     sim.emit(new SimEvent.BoxReveal(shown));
                 }
             } else if (timer <= 0) {
-                state = State.CLOSED;
+                close();
             }
         }
     }
@@ -227,13 +234,13 @@ public abstract sealed class Interactable {
         }
 
         @Override
-        public boolean usable(GameSim sim) {
+        public boolean usable(GameSim sim, Player p) {
             return !open;
         }
 
         @Override
-        public void use(GameSim sim) {
-            if (open || !pay(sim, def.cost())) return;
+        public void use(GameSim sim, Player p) {
+            if (open || !pay(sim, p, def.cost())) return;
             sim.openDoor(this);
         }
     }

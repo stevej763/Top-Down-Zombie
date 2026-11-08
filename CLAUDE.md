@@ -48,7 +48,7 @@ The client has no test suite or linter. `npm run build` must pass with zero type
 | `web/WebConfig.java` | CORS for the dev origin (`CORS_ORIGINS`) |
 | `resources/db/migration/` | Flyway SQL. Hibernate runs with `ddl-auto: validate`, so schema changes need a new `V<n>__*.sql` |
 | `src/test/` | `ApiIntegrationTest`, `MapApiTest`: Spring Boot + Testcontainers Postgres tests over real HTTP |
-| `server/sim/src/test/` | `GameSimTest` (the feature checks: doors, perks, Tough Hide, Second Wind, armour, upgrades, box, power-ups, plasma splash, knife, rebuild cap, determinism, bot survival), `SimParityTest`, `RngTest`, `MapValidatorTest` |
+| `server/sim/src/test/` | `GameSimTest` (the feature checks: doors, perks, Tough Hide, Second Wind, armour, upgrades, box, power-ups, plasma splash, knife, rebuild cap, determinism, bot survival), `CoopSimTest` (multi-player: separate economies, targeting, multi-source flow field, downed/revive/bleed-out/respawn, box owner, shared power-ups, party scaling, event JSON), `SimParityTest`, `RngTest`, `MapValidatorTest` |
 
 Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS`, `ADMIN_TOKEN`.
 
@@ -135,7 +135,7 @@ The user chose an **authoritative Java server**: eventually the server runs the 
 1. ~~Foundation + online high scores~~ (done)
 2. ~~Maps as data~~ (done). A map editor is still out of scope.
 3. ~~Sim split + port~~ (done)
-4. **Co-op over WebSocket (`/ws`):** `GameRoom` ticking at 60 Hz with 20 Hz snapshots, lobbies by room code (max 4), input with seq numbers, client prediction for the local player and interpolation for everything else, per-player economy/perks, downed/revive, and the server writes scores itself. Then the TS sim is retired.
+4. **Co-op over WebSocket (`/ws`). Detailed plan with milestones M1–M5: `docs/phase4-coop.md`.** `GameRoom` ticking at 60 Hz with 20 Hz snapshots, lobbies by room code (max 4), input with seq numbers, client prediction for the local player and interpolation for everything else, per-player economy/perks, downed/revive, and the server writes scores itself. Then the TS sim is retired.
 
 ## Possible next steps (not started)
 Gamepad support · zombie variety (dogs/bosses) · a teddy-bear style box relocation · an aim-assist toggle in the menu · persistent stats · mobile/touch controls.
