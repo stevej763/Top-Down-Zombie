@@ -383,6 +383,26 @@ class GameSimTest {
     }
 
     @Test
+    void zombiesCrowdingAnOpenWindowStillClimbIn() {
+        // Two zombies side by side along the wall push each other off the window's standing spot;
+        // neither may end up waiting forever outside an unboarded window.
+        GameSim s = quiet();
+        Barricade b = s.barricades.getFirst();
+        b.planks = 0;
+        double ax = b.def.dy(), ay = b.def.dx();
+        List<Zombie> zs = List.of(-1, 1).stream().map(side -> {
+            double off = Zombie.RADIUS + 1;
+            Zombie z = new Zombie(s.nextId(), b, b.outsidePoint.x() + ax * off * side, b.outsidePoint.y() + ay * off * side,
+                    100, 60, 0, false, 1);
+            z.state = Zombie.State.BREACHING;
+            s.zombies.add(z);
+            return z;
+        }).toList();
+        idle(s, 60 * 5);
+        assertThat(zs).allMatch(z -> z.state == Zombie.State.INSIDE);
+    }
+
+    @Test
     void zombiesBreakInAndHurtAnIdlePlayer() {
         GameSim s = solo("house", 3);
         int ticks = 0;
