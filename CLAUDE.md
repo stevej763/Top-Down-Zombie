@@ -16,7 +16,7 @@ The roadmap for the backend (maps as data, porting the sim to Java, authoritativ
 cd client && npm run dev       # Vite dev server; proxies /api and /ws to localhost:8080
 cd client && npm run build     # tsc --noEmit + vite build → dist/  (use this as the type-check)
 cd client && npm run parity    # re-record the TS reference run that the Java SimParityTest replays
-docker compose up -d --build   # db + server + web (nginx) on http://localhost:8551
+docker compose up -d --build   # db + server + web (nginx) on http://localhost:8551 (Gradle/npm caches persist; see Assets)
 ```
 
 No JDK is installed on the dev machine, so Gradle runs in Docker (the `gradle-cache` volume keeps dependencies between runs; the socket mount is for Testcontainers):
@@ -43,14 +43,15 @@ The client has no test suite or linter. `npm run build` must pass with zero type
 | Path | Role |
 |---|---|
 | `player/` | `Player` entity, `PlayerAuth` (issues 32-byte anonymous bearer tokens, stores only their SHA-256, resolves `Authorization: Bearer`), `PlayerController`: `POST /api/players {name}`, `PATCH /api/players/me` |
-| `score/` | `Score` entity, `ScoreController`: `GET /api/scores?map=&limit=` (ordered by round, kills, points), `POST /api/scores` (auth, validated, in-memory per-player rate limit) |
+| `score/` | `Score` entity, `ScoreController`: `GET /api/scores?map=&limit=` (ordered by round, kills, points). `ScoreService` (a `game.ScoreRecorder`) is the only writer: rooms record one row per player at game over. There is no `POST` |
+| `game/` | Co-op over `/ws` (Phase 4 M2). `WebSocketConfig` + `TokenHandshakeInterceptor` (`?token=`, 401 if unknown), `GameSocketHandler` (parses `protocol.ClientMessage`, wraps sessions in `ConcurrentWebSocketSessionDecorator`, optional debug latency), `LobbyService` (rooms by 4-letter code, account → room), `GameRoom` (members, lobby/playing, the `GameSim`, 60 Hz `tick()`, input queues, 30 s grace), `RoomTicker`, `SnapshotBuilder`. Protocol records are in `game/protocol`, mirrored by `client/src/net/protocol.ts` |
 | `map/` | `MapService`, `MapSeeder`, `MapController`: `GET /api/maps`, `GET /api/maps/{id}` (the document), `PUT /api/maps/{id}` (needs `X-Admin-Token` = `ADMIN_TOKEN`; disabled when unset). Saves only bump `version` when the document actually changes |
 | `web/WebConfig.java` | CORS for the dev origin (`CORS_ORIGINS`) |
 | `resources/db/migration/` | Flyway SQL. Hibernate runs with `ddl-auto: validate`, so schema changes need a new `V<n>__*.sql` |
-| `src/test/` | `ApiIntegrationTest`, `MapApiTest`: Spring Boot + Testcontainers Postgres tests over real HTTP |
+| `src/test/` | `ApiIntegrationTest`, `MapApiTest`, `GameSocketIT` (real sockets with `BotClient`): Spring Boot + Testcontainers Postgres. `GameRoomTest`, `LobbyServiceTest`, `SnapshotBuilderTest`: plain unit tests with `FakeConnection` and a manual clock. `LoadTrialIT` runs only with `LOAD_TRIAL=1` |
 | `server/sim/src/test/` | `GameSimTest` (the feature checks: doors, perks, Tough Hide, Second Wind, armour, upgrades, box, power-ups, plasma splash, knife, rebuild cap, determinism, bot survival), `CoopSimTest` (multi-player: separate economies, targeting, multi-source flow field, downed/revive/bleed-out/respawn, box owner, shared power-ups, party scaling, event JSON), `SimParityTest`, `RngTest`, `MapValidatorTest` |
 
-Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS`, `ADMIN_TOKEN`.
+Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS`, `ADMIN_TOKEN`, and the dev-only `DEBUG_LATENCY_MS` (delays `/ws` messages each way).
 
 ### Maps (`maps/*.json`)
 - Each file is a map document named `<id>.json` (`MapDoc` in `server/sim/.../map/`, mirrored by `client/src/sim/MapData.ts`). Tile rows are strings: `.` outside, `_` floor, `#` wall, `W` window, `C` crate, `D` door. Rooms aren't painted on tiles; `MapValidator` flood-fills floor and names each area from the windows, doors and `playerStart` that touch it, so those names have to agree.
@@ -59,7 +60,7 @@ Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS`, 
 - The validator checks weapon and perk ids against `shared/defs`.
 - Both compose images are built from the repo root (`server/Dockerfile`, `client/Dockerfile`, each with a `Dockerfile.dockerignore` beside it) so they can include `maps/` and `shared/`. In compose, nginx (`client/nginx.conf`) proxies `/api/` and `/ws` to `server:8080`. It resolves that name per request, so the game still loads when the server is down.
 
-Scores are **client-submitted** for now, so they can be faked. That goes away when the server runs the simulation.
+Scores are **written by the server** at game over (`GameRoom` → `ScoreService`). The browser client still runs the TS sim locally until Phase 4 M4, so for now its runs only reach the local (localStorage) leaderboard.
 
 ## Client architecture (client/src/)
 
@@ -84,6 +85,7 @@ Scores are **client-submitted** for now, so they can be faked. That goes away wh
 | `sim/Economy.ts`, `sim/PowerUps.ts`, `sim/Weapon.ts` | Points (`award()` applies Double Points, vs `spend()`, the per-round rebuild cap); power-up drops and timers; per-instance ammo, reload and upgrade tier |
 | `systems/Particles.ts` | Client-only particles, tracers, decals and floating text |
 | `systems/HighScore.ts` | `Leaderboard` (`game.scores`): one map's table at a time (`show(mapId)`). It's the server's table when reachable, otherwise this browser's top 10 for that map in localStorage (`boarded-up-scores` for house, `boarded-up-scores:<id>` for others), which is always updated too |
+| `net/protocol.ts` | Types for the `/ws` messages, mirroring `server/app/.../game/protocol` and the Java `SimEvent`. Not used until Phase 4 M4 |
 | `net/api.ts` | REST client. The identity `{name, playerId?, token?}` is kept under `boarded-up-identity`. The name is saved locally first and registered when the server answers; registration is retried on score submit |
 | `weapons/WeaponDefs.ts` | **Weapon stat table**, `BOX_POOL`, and the `KNIFE` constants. `weapons/Weapon.ts` holds per-instance ammo, reload state and upgrade tier (0–2), plus the derived stats (`damage`, `magSize`, `name`, ...) |
 | `render/draw.ts` | All procedural drawing: map pre-render, zombies, player, windows, interactables (`drawInteractable`, `drawInteractableOverlay`), power-ups. `render/lighting.ts` draws the darkness overlay with punched-out lights and the coloured machine glows. `render/visuals.ts` holds the visual-only tables and the `PlayerFx`/`ZombieFx` types |
@@ -104,6 +106,7 @@ WASD/arrows move · mouse aims · Space or left click fires · R reload · E int
 
 ## Assets
 - Soundtrack: `client/public/audio/tracks/NN-slug.mp3` (20 tracks). These were split from one long mix with ffmpeg stream copy (`-c copy`, ID3 title tags). They shuffle without repeats; `tracks.ts` is the playlist. Paths use `import.meta.env.BASE_URL`.
+- Both Dockerfiles use BuildKit cache mounts (`boarded-up-gradle` for the Gradle home, with `--build-cache`; `boarded-up-npm` for npm). These survive source changes, so `docker compose up --build` doesn't download Gradle or dependencies again. `docker builder prune` clears them.
 - Vite copies everything in `public/` into the build and the Docker image, so keep large unused files out of it.
 
 ## Testing without a browser

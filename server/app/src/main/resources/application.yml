@@ -22,5 +22,6 @@ boarded-up:
   cors-origins: ${CORS_ORIGINS:http://localhost:5173}
   # Enables PUT /api/maps/{id} (X-Admin-Token header). Empty disables map uploads.
   admin-token: ${ADMIN_TOKEN:}
-  # Score submissions per player per minute.
-  score-rate-limit: 6
+  debug:
+    # Dev only: delays every /ws message by this much in each direction, to try client prediction.
+    latency-ms: ${DEBUG_LATENCY_MS:0}

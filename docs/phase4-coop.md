@@ -85,8 +85,22 @@ Change only `server/sim`. **`SimParityTest` must keep passing untouched**; it pr
 
 The TS sim is not changed in M1, so the parity file stays valid.
 
-### M2: Rooms, protocol and server-side scores
+### M2: Rooms, protocol and server-side scores ✅ done
 Changes in `server/app` (new package `com.boardedup.game`):
+
+**As built** (details the plan left open):
+- Rooms see sockets through the `Connection` interface (`send(ServerMessage)`, `close()`). Tests use `FakeConnection`; `GameSocketHandler.SocketConnection` serializes with `writerFor(ServerMessage.class)` so `type` is written.
+- **Locking:** every `GameRoom` membership method and `tick()` are `synchronized` on the room; only `input()` is lock-free. `LobbyService` synchronizes create/join; rooms call back through `GameRoom.Listener`, which only touches concurrent maps, so the two locks are never taken in opposite order.
+- **Ticking:** `RoomTicker` (a shared `ScheduledExecutorService`, fixed rate per room) implements `LobbyService.Ticker`. Tests construct rooms directly and call `tick()`; grace periods use an injected `InstantSource`. A sim exception is logged, sends `error` "The game crashed" and returns the room to the lobby rather than killing its task.
+- **Lifecycle:** after `gameOver` the room goes back to the **lobby** with everyone unready; the owner (or the solo player) sends `start` again. The owner is the first member; if they leave, the next one takes over. `start` needs every *other* member ready. Leaving mid-game removes you from the sim with no score. A second socket for the same account replaces the first (the old one is closed). Grace also applies in the lobby.
+- **Input:** one per tick; when the queue holds more than 6, the oldest are dropped with their presses (`firePressed`, `reload`, `knife`, `interactPressed`, `swap`, `selectSlot`) merged into the next. An idle tick repeats the last input without its presses. Inputs are sanitized (`ClientInput.toPlayerInput`: NaN aim, out-of-range slots). More than 120 queued inputs are ignored. **Seqs restart at 1 each game** (`lastSeq` resets on start).
+- Extra message fields: `lobby` has `state` (`"lobby"`/`"playing"`). Reconnecting sends `welcome`, `lobby`, then `start` if a game is running. Every tick with events sends one `events` message; snapshots go out on ticks divisible by 3 and on the game-over tick.
+- `gameOver.round` is rounds survived (round reached − 1), as stored. `rank` is the **0-based** leaderboard position (`ScoreRepository.countAhead`), -1 if saving failed. `ScoreService` implements `ScoreRecorder`.
+- Snapshot `powerUps.drops[].id` is the power-up kind (drops have no entity id). `interactables` are in GameSim order: wall buys, perks, armour, upgrade, box, doors.
+- **Measured:** at full load (4 players, 42 zombies) a snapshot averages ~4.1 KB, max ~5 KB, so up to ~100 KB/s per client (`SnapshotBuilderTest`). `LoadTrialIT` (`LOAD_TRIAL=1`, 10 rooms × 4 bots for 20 s, 10 CPUs) kept every bot at 20.0 snapshots/s with no missed snapshots.
+- Latency: `boarded-up.debug.latency-ms` (env `DEBUG_LATENCY_MS`) delays inbound and outbound messages on one thread, so order is kept.
+- nginx now forwards `Host $http_host` (with the port) for `/ws` and `/api/`; without it, Spring's same-origin check saw `server:8080` and would refuse browser handshakes.
+- The client isn't wired up yet: `client/src/net/protocol.ts` is the TS mirror, unused until M4. `submitScore` now gets a 405 and the leaderboard falls back to local scores, as it does when offline.
 
 - **`WebSocketConfig`** registers the handler at `/ws`. A handshake interceptor reads `?token=` and resolves the player via `PlayerAuth`; unknown tokens are rejected. The configured CORS origins apply.
 - **`GameSocketHandler`**:

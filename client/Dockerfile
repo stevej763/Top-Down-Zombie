@@ -1,10 +1,12 @@
+# syntax=docker/dockerfile:1
 # Built from the repo root (see docker-compose.yml) because the sim imports ../shared/defs.
 
 # --- Build stage: compile TypeScript and bundle with Vite ---
 FROM node:22-alpine AS build
 WORKDIR /src/client
 COPY client/package.json client/package-lock.json ./
-RUN npm ci
+# npm's download cache survives lockfile changes, so only new packages are fetched.
+RUN --mount=type=cache,id=boarded-up-npm,target=/root/.npm npm ci
 COPY shared /src/shared
 COPY client .
 RUN npm run build
