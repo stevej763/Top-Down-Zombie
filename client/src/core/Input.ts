@@ -4,8 +4,8 @@ const GAME_KEYS = new Set([
 
 /** Keyboard + mouse state. `pressed` flags last until the end of the next fixed update tick. */
 export class Input {
-  private down = new Set<string>();
-  private pressed = new Set<string>();
+  protected down = new Set<string>();
+  protected pressed = new Set<string>();
   /** Mouse position in canvas (view) coordinates. */
   readonly mouse = { x: 0, y: 0 };
   mouseDown = false;
@@ -14,7 +14,7 @@ export class Input {
   /** Printable characters typed this tick, for text fields. */
   typed = '';
 
-  constructor(private canvas: HTMLCanvasElement, private viewW: number, private viewH: number) {
+  constructor(protected canvas: HTMLCanvasElement, protected viewW: number, protected viewH: number) {
     window.addEventListener('keydown', (e) => {
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
