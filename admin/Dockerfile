@@ -5,7 +5,7 @@
 FROM node:22-alpine AS build
 WORKDIR /src/admin
 COPY admin/package.json admin/package-lock.json ./
-RUN --mount=type=cache,id=boarded-up-npm,target=/root/.npm npm ci
+RUN --mount=type=cache,id=top-down-survival-npm,target=/root/.npm npm ci
 COPY shared /src/shared
 COPY client/src /src/client/src
 COPY admin .

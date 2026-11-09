@@ -1,11 +1,12 @@
 import { rand } from '../core/math';
+import { loadStored } from '../core/storage';
 import type { WeaponId } from '../game/defs';
 import { TRACKS, type Track } from './tracks';
 
 // Gains at 100% on the matching slider.
 const MASTER_VOLUME = 0.5;
 const MUSIC_VOLUME = 0.5;
-const SETTINGS_KEY = 'boarded-up-audio';
+const SETTINGS_KEY = 'top-down-survival-audio';
 const TRACKS_URL = `${import.meta.env.BASE_URL}audio/tracks/`;
 
 export type VolumeChannel = 'master' | 'music' | 'sfx';
@@ -18,7 +19,7 @@ interface AudioSettings {
 function loadSettings(): AudioSettings {
   const settings: AudioSettings = { volume: { master: 1, music: 0.7, sfx: 1 }, muted: false };
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<AudioSettings>;
+    const saved = JSON.parse(loadStored(SETTINGS_KEY) ?? '{}') as Partial<AudioSettings>;
     for (const ch of Object.keys(settings.volume) as VolumeChannel[]) {
       const v = saved.volume?.[ch];
       if (typeof v === 'number') settings.volume[ch] = Math.min(1, Math.max(0, v));

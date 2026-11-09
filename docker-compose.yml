@@ -1,14 +1,16 @@
+name: top-down-survival
+
 services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: boardedup
-      POSTGRES_USER: boardedup
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-boardedup}
+      POSTGRES_DB: topdownsurvival
+      POSTGRES_USER: topdownsurvival
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-topdownsurvival}
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U boardedup -d boardedup"]
+      test: ["CMD-SHELL", "pg_isready -U topdownsurvival -d topdownsurvival"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -18,15 +20,15 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: boarded-up-server
+    image: top-down-survival-server
     environment:
       # Set in a .env file to enable PUT /api/maps/{id}.
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       # The web dev server, then the mobile app's WebView origins (iOS, Android).
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,capacitor://localhost,https://localhost}
-      DB_URL: jdbc:postgresql://db:5432/boardedup
-      DB_USER: boardedup
-      DB_PASSWORD: ${DB_PASSWORD:-boardedup}
+      DB_URL: jdbc:postgresql://db:5432/topdownsurvival
+      DB_USER: topdownsurvival
+      DB_PASSWORD: ${DB_PASSWORD:-topdownsurvival}
     depends_on:
       db:
         condition: service_healthy
@@ -36,7 +38,7 @@ services:
     build:
       context: .
       dockerfile: client/Dockerfile
-    image: boarded-up
+    image: top-down-survival
     ports:
       - "8551:80"
     depends_on:
@@ -48,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: admin/Dockerfile
-    image: boarded-up-admin
+    image: top-down-survival-admin
     ports:
       - "8552:80"
     depends_on:

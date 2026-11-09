@@ -1,4 +1,5 @@
 import type { MapDoc } from '../../client/src/game/MapData';
+import { loadStored } from '../../client/src/core/storage';
 
 export interface MapSummary {
   id: string;
@@ -6,10 +7,10 @@ export interface MapSummary {
   version: number;
 }
 
-const TOKEN_KEY = 'boarded-up-admin-token';
+const TOKEN_KEY = 'top-down-survival-admin-token';
 
 export const adminToken = {
-  get: () => localStorage.getItem(TOKEN_KEY) ?? '',
+  get: () => loadStored(TOKEN_KEY) ?? '',
   set: (t: string) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY)),
 };
 

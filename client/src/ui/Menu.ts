@@ -437,10 +437,18 @@ function drawPlank(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.restore();
 }
 
+const LOGO = 'TOP DOWN SURVIVAL';
+const LOGO_MAX_W = 760;
+
 function drawLogo(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  drawPlank(ctx, x - 6, y - 20, 580, 36, -0.05);
-  drawPlank(ctx, x + 8, y + 24, 540, 34, 0.04);
-  shadowText(ctx, 'BOARDED UP', x, y, `92px ${DISPLAY_FONT}`, '#b01414', 'center', 'middle');
+  // Shrink to fit when Impact is missing and the wider fallback font is used.
+  ctx.font = `92px ${DISPLAY_FONT}`;
+  const size = Math.min(92, Math.floor((92 * LOGO_MAX_W) / ctx.measureText(LOGO).width));
+  ctx.font = `${size}px ${DISPLAY_FONT}`;
+  const w = ctx.measureText(LOGO).width;
+  drawPlank(ctx, x - 6, y - 20, w + 50, 36, -0.04);
+  drawPlank(ctx, x + 8, y + 24, w + 10, 34, 0.03);
+  shadowText(ctx, LOGO, x, y, `${size}px ${DISPLAY_FONT}`, '#b01414', 'center', 'middle');
 }
 
 function drawItem(ctx: CanvasRenderingContext2D, it: Item, r: Rect, sel: boolean): void {

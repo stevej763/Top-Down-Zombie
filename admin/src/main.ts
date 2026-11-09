@@ -63,7 +63,7 @@ function syncPanels(): void {
   button('clean').classList.toggle('on', view.clean);
   const ok = editor.problems.length === 0;
   button('save').title = ok ? 'PUT /api/maps/<id> (Ctrl+S)' : `Fix ${editor.problems.length} problem(s) first`;
-  document.title = `${editor.draft.name || editor.draft.id} · Boarded Up admin`;
+  document.title = `${editor.draft.name || editor.draft.id} · Top Down Survival admin`;
 }
 
 function focus(tx: number, ty: number): void {

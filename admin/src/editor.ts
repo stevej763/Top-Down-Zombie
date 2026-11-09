@@ -1,5 +1,6 @@
 import type { PerkId, WeaponId } from '../../client/src/game/defs';
 import type { DecorDef, WallSpot } from '../../client/src/game/MapData';
+import { loadStored } from '../../client/src/core/storage';
 import {
   at, DECOR_BY_KIND, footprint, inside, setCell, toDoc, type DecorKind, type Draft, type Face, type PlaceKind,
   type TileChar,
@@ -29,7 +30,7 @@ export interface Rect {
   y1: number;
 }
 
-const DRAFT_KEY = 'boarded-up-admin-draft';
+const DRAFT_KEY = 'top-down-survival-admin-draft';
 const MAX_UNDO = 200;
 const DIRS: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
 
@@ -129,7 +130,7 @@ export class Editor {
 
   static savedDraft(): Draft | null {
     try {
-      const s = localStorage.getItem(DRAFT_KEY);
+      const s = loadStored(DRAFT_KEY);
       return s ? (JSON.parse(s) as Draft) : null;
     } catch {
       return null;

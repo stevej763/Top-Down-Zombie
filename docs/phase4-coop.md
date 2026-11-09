@@ -86,7 +86,7 @@ Change only `server/sim`. **`SimParityTest` must keep passing untouched**; it pr
 The TS sim is not changed in M1, so the parity file stays valid.
 
 ### M2: Rooms, protocol and server-side scores ✅ done
-Changes in `server/app` (new package `com.boardedup.game`):
+Changes in `server/app` (new package `com.topdownsurvival.game`):
 
 **As built** (details the plan left open):
 - Rooms see sockets through the `Connection` interface (`send(ServerMessage)`, `close()`). Tests use `FakeConnection`; `GameSocketHandler.SocketConnection` serializes with `writerFor(ServerMessage.class)` so `type` is written.
@@ -98,7 +98,7 @@ Changes in `server/app` (new package `com.boardedup.game`):
 - `gameOver.round` is rounds survived (round reached − 1), as stored. `rank` is the **0-based** leaderboard position (`ScoreRepository.countAhead`), -1 if saving failed. `ScoreService` implements `ScoreRecorder`.
 - Snapshot `powerUps.drops[].id` is the power-up kind (drops have no entity id). `interactables` are in GameSim order: wall buys, perks, armour, upgrade, box, doors.
 - **Measured:** at full load (4 players, 42 zombies) a snapshot averages ~4.1 KB, max ~5 KB, so up to ~100 KB/s per client (`SnapshotBuilderTest`). `LoadTrialIT` (`LOAD_TRIAL=1`, 10 rooms × 4 bots for 20 s, 10 CPUs) kept every bot at 20.0 snapshots/s with no missed snapshots.
-- Latency: `boarded-up.debug.latency-ms` (env `DEBUG_LATENCY_MS`) delays inbound and outbound messages on one thread, so order is kept.
+- Latency: `top-down-survival.debug.latency-ms` (env `DEBUG_LATENCY_MS`) delays inbound and outbound messages on one thread, so order is kept.
 - nginx now forwards `Host $http_host` (with the port) for `/ws` and `/api/`; without it, Spring's same-origin check saw `server:8080` and would refuse browser handshakes.
 - The client isn't wired up yet: `client/src/net/protocol.ts` is the TS mirror, unused until M4. `submitScore` now gets a 405 and the leaderboard falls back to local scores, as it does when offline.
 
@@ -117,7 +117,7 @@ Changes in `server/app` (new package `com.boardedup.game`):
   - **Output:** every tick with events, send `events` (batched; one message per tick at most). Every 3rd tick, send a `snapshot`. On game over, send `gameOver` and write scores (below).
   - **Lifecycle:** a disconnect starts the 30 s grace period; reconnecting with the same token rebinds the session; an empty room stops its task and is removed.
   - `Clock` injection, so tests can step rooms manually instead of waiting on real time.
-- **Protocol records** in `com.boardedup.game.protocol`. TypeScript mirrors go in `client/src/net/protocol.ts`; keep the two in sync and the field names identical.
+- **Protocol records** in `com.topdownsurvival.game.protocol`. TypeScript mirrors go in `client/src/net/protocol.ts`; keep the two in sync and the field names identical.
   - **Client → server:**
     - `{type:"create", mapId, solo}`
     - `{type:"join", code}`
@@ -146,7 +146,7 @@ Changes in `server/app` (new package `com.boardedup.game`):
     - `interactables:[{open?}|{state, shown, timer, owner}|{}]` (in map order: doors carry `open`, the box carries its state, others are empty)
   - Expect roughly 2–4 KB per snapshot at full load, so about 80 KB/s per client at 20 Hz. Fine for now. Measure it in a test and log it.
 - **Scores:** on game over the room writes `scores` rows via `ScoreRepository` (`party_size` = number of players who started). Then remove `POST /api/scores`, `ScoreRateLimiter` and their tests. Keep the `GET` endpoints.
-- **Dev-only latency:** a `boarded-up.debug.latency-ms` setting (default 0) delays outbound messages, and inbound ones by the same amount, for testing prediction.
+- **Dev-only latency:** a `top-down-survival.debug.latency-ms` setting (default 0) delays outbound messages, and inbound ones by the same amount, for testing prediction.
 - **Tests:**
   - `GameRoomTest` with a manual clock: input queueing, merged presses, ack tracking, snapshot cadence, grace and reconnect, empty-room cleanup, scores written at game over.
   - `LobbyServiceTest`: codes, full room, join after start rejected, owner-only start.

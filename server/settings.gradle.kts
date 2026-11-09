@@ -1,3 +1,3 @@
-rootProject.name = "boarded-up-server"
+rootProject.name = "top-down-survival-server"
 
 include("sim", "app")

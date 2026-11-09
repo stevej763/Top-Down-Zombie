@@ -8,7 +8,7 @@ const devUrl = process.env.CAP_DEV_URL;
 
 const config: CapacitorConfig = {
   appId: 'app.topdownsurvival.game',
-  appName: 'Boarded Up',
+  appName: 'Top Down Survival',
   webDir: 'dist',
   backgroundColor: '#000000',
   server: devUrl ? { url: devUrl, cleartext: true } : undefined,

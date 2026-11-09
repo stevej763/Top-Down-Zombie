@@ -6,7 +6,7 @@ FROM node:22-alpine AS build
 WORKDIR /src/client
 COPY client/package.json client/package-lock.json ./
 # npm's download cache survives lockfile changes, so only new packages are fetched.
-RUN --mount=type=cache,id=boarded-up-npm,target=/root/.npm npm ci
+RUN --mount=type=cache,id=top-down-survival-npm,target=/root/.npm npm ci
 COPY shared /src/shared
 COPY client .
 RUN npm run build
