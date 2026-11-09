@@ -1,4 +1,4 @@
-# Boarded Up — top-down zombie survival shooter
+# Top Down Survival — top-down zombie survival shooter
 
 Browser game: the player defends a boarded-up house against rounds of zombies. Zombies tear planks off windows and climb in. The player earns points for hits, kills and rebuilding planks, then spends them on doors, wall weapons, perks, armour, weapon upgrades and the mystery box. Zombies get tougher every round. Two maps: **The House** (a furnished living room, kitchen-diner, bedroom with en-suite, and garage; everything powered from the start) and **The Farmstead** (a furnished farmhouse and a barn with a tractor and hay, joined by a covered walkway; the box, perks and upgrade bench are dead and the buildings dark until someone throws the power switch in the barn's generator room).
 
@@ -29,12 +29,12 @@ docker run --rm -v "$PWD":/w -w /w/server -v gradle-cache:/home/gradle/.gradle \
   -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
   gradle:9-jdk25 ./gradlew test --no-daemon
 ```
-With a local JDK 25: `./gradlew test`, and `./gradlew :app:bootRun` (needs Postgres on localhost:5432, db/user/password `boardedup`; for example `docker compose up -d db` with a port mapping added).
+With a local JDK 25: `./gradlew test`, and `./gradlew :app:bootRun` (needs Postgres on localhost:5432, db/user/password `topdownsurvival`; for example `docker compose up -d db` with a port mapping added).
 
 The client has no test suite or linter; its only dev dependencies are TypeScript, Vite and `@napi-rs/canvas` (for the map previews). `npm run build` must pass with zero type errors. `tsconfig` is strict, with `noUnusedLocals` and `noUnusedParameters`; prefix intentionally unused params with `_`.
 
 ## Netcode
-- **Gameplay changes go in Java only** (`server/sim`, package `com.boardedup.sim`): `GameSim`, `Player`, `Zombie`, `Interactable`, `RoundManager`, `FlowField`, ... It's plain Java (no Spring) and depends only on Jackson to read `shared/defs` and maps. `server/app` depends on it; it also owns `MapDoc` and `MapValidator`. One room's tick thread is the only thing that touches its `GameSim`.
+- **Gameplay changes go in Java only** (`server/sim`, package `com.topdownsurvival.sim`): `GameSim`, `Player`, `Zombie`, `Interactable`, `RoundManager`, `FlowField`, ... It's plain Java (no Spring) and depends only on Jackson to read `shared/defs` and maps. `server/app` depends on it; it also owns `MapDoc` and `MapValidator`. One room's tick thread is the only thing that touches its `GameSim`.
 - **Protocol:** JSON over `/ws?token=…`. Records in `server/app/.../game/protocol` (`ClientMessage`, `ServerMessage`), mirrored by `client/src/net/protocol.ts`; keep field names identical. Client → server: `create`/`join`/`ready`/`start`/`leave` (lobby), `input` (a batch of `PlayerInput`s with seqs), `pause` (solo only: the room stops stepping the sim), `ping`. Server → client: `welcome` (your id, the room and the map document), `lobby`, `start {tick, seq}` (`seq` = last input applied for you, so a resumed client numbers on from it), `snapshot` (includes `power`), `events` (includes `powerOn`), `gameOver`, `pong`, `error`. The sim's `SimEvent`s go out as JSON (`NetEvent` in `protocol.ts`), each carrying the acting `player`.
 - **Rates:** `GameRoom` steps at 60 Hz (`TICK_HZ`) and sends a snapshot every 3rd tick (20 Hz, `SNAPSHOT_EVERY`), plus an `events` message on any tick that emitted some. A dropped socket keeps its seat for 30 s (`GRACE`). Sockets never block the tick: each connection queues its messages and sends them from its own virtual thread (dropped past 512 KB queued or a send stuck 5 s). At game over, scores are saved off the tick thread; the sim freezes until they're saved (at most `SCORE_WAIT`, 3 s, after which ranks show as -1).
 - **Snapshots** are `WorldView` (`client/src/view/WorldView.ts`) plus `type`/`tick`/`acks` (last input seq applied per player). `SnapshotBuilder` writes them; `SnapshotBuilderTest` pins the shape.
@@ -45,7 +45,7 @@ The client has no test suite or linter; its only dev dependencies are TypeScript
 - **Power:** `GameSim.power` starts on unless the map has a `power` switch (`Interactable.PowerSwitch`, free, any player, stays on). `Interactable.needsPower()` (box, perk machines, upgrade bench) makes `Player` ignore E on them while it's off; they still prompt ("needs power"). The client draws unpowered machines dim and without glow. The room lights are client-only: `buildLevel` flood-fills the pristine map into `Level.lights` (rooms plus their walls, lamps on a ~6-tile grid), `Lighting` draws them once per level into a mask cut out of the darkness, and `Game.roomLight()` flickers them on after a `powerOn` event. Maps without a switch have no lights.
 - **Cosmetic state stays in the client:** muzzle flash, hurt flash, knife swing (`PlayerFx`, per player id), per-zombie hit flash and arm wobble (`ZombieFx`, keyed by zombie `id`), and door swings (`doorFx`: a door swings open, away from the nearest player, when a snapshot first shows it open; `doorSide`/`doorSwingAt` in `draw.ts`), all in `core/Game.ts`. Plank tilt is a hash in `draw.ts`. Visual tables (tracer colours, barrel lengths, shake, perk and power-up colours, machine glows) are in `render/visuals.ts`. Prompt text is in `ui/prompts.ts`. None of these are in the Java sim.
 
-## Server (server/app, package `com.boardedup`)
+## Server (server/app, package `com.topdownsurvival`)
 
 | Path | Role |
 |---|---|
@@ -73,7 +73,7 @@ Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS`, 
 Scores are **written by the server** at game over (`GameRoom` → `ScoreService`). Every game, solo included, is played in a server room, so every finished run reaches the online leaderboard (rounds survived ≥ 0, one row per player).
 
 ## Admin portal (admin/src/)
-A separate client for admin tools; for now only the map editor. DOM panels around one canvas. It needs the server only to open maps and to save them; drafts autosave to `localStorage` (`boarded-up-admin-draft`).
+A separate client for admin tools; for now only the map editor. DOM panels around one canvas. It needs the server only to open maps and to save them; drafts autosave to `localStorage` (`top-down-survival-admin-draft`).
 
 | Path | Role |
 |---|---|
@@ -108,12 +108,12 @@ A separate client for admin tools; for now only the map editor. DOM panels aroun
 | `systems/Particles.ts` | Client-only particles, tracers, decals and floating text |
 | `systems/HighScore.ts` | `Leaderboard` (`game.scores`): one map's server table at a time (`show(mapId)`), `lastRank` from your `gameOver` result. No local scores any more (the old localStorage keys are just ignored) |
 | `net/protocol.ts` | Types for the `/ws` messages, mirroring `server/app/.../game/protocol` and the Java `SimEvent`. `Snapshot` is `WorldView` + `type`/`tick`/`acks` |
-| `net/api.ts` | REST client. The identity `{name, playerId?, token?}` is kept under `boarded-up-identity`. The name is saved locally first and registered when the server answers; `ensureRegistered()` retries it when connecting. A 401 on rename means the server forgot the token, so it registers afresh |
+| `net/api.ts` | REST client. The identity `{name, playerId?, token?}` is kept under `top-down-survival-identity`. The name is saved locally first and registered when the server answers; `ensureRegistered()` retries it when connecting. A 401 on rename means the server forgot the token, so it registers afresh |
 | `render/furniture.ts` | Map `decor` for the pre-render: floor finishes (`checker`, `carpet`, `tile`, `concrete`, `straw`), rugs and stains, and furniture pieces (sofa, bed, counters, car, tractor, hay, piano, generator, ...), each drawn front-down in a local frame then rotated to its `face` |
 | `render/draw.ts` | All procedural drawing from views: map pre-render (`renderMap(MapData)`, with decor), zombies, players (`drawPlayer`: local blue, teammates by id, downed lying down, dead not drawn; `drawPlayerOverlay` after lighting: name tags, bleed-out ring), windows, interactables (`drawInteractable`, `drawInteractableOverlay`, switching on `Fixture.kind`), power-ups. `render/lighting.ts` draws the darkness overlay with punched-out lights (a small glow per player, and a torch cone per living player, ray-cast so it stops at walls and closed doors with 15% leaking through, and at crates and tall furniture with 55% getting past, and off once the room lights are on) and the coloured machine glows. `render/visuals.ts` holds the visual-only tables and the `PlayerFx`/`ZombieFx` types |
 | `ui/Menu.ts` | Title and pause menus: pages (main / high scores / audio / controls / name / maps / mode / join / lobby) of buttons, sliders, toggles and text fields, keyboard and mouse driven. Item rects come from one `rects()` used by both update and draw. New Game asks for a name the first time, then map select (if more than one map), then Play Solo / Host Co-op. Join Game takes a 4-letter code. The lobby shows the code, the seats (host / ready / away), Start for the host and a Ready toggle for others; Esc leaves the room. `fail(msg)` / `done()` end the wait for the server. High Scores flips maps with ←/→ |
 | `ui/HUD.ts`, `ui/Screens.ts`, `ui/prompts.ts`, `ui/text.ts` | HUD (round, points, ammo, perks, armour, prompts, banners, now-playing toast), the game-over screen, and interaction prompt text |
-| `audio/Sound.ts` | A singleton `sound` that synthesizes every SFX and plays the shuffled soundtrack. The AudioContext is created lazily on the first user gesture (`unlock()`). Master/music/effects volumes and mute persist under `boarded-up-audio`; SFX go through their own gain bus. `audio/tracks.ts` lists the soundtrack files |
+| `audio/Sound.ts` | A singleton `sound` that synthesizes every SFX and plays the shuffled soundtrack. The AudioContext is created lazily on the first user gesture (`unlock()`). Master/music/effects volumes and mute persist under `top-down-survival-audio`; SFX go through their own gain bus. `audio/tracks.ts` lists the soundtrack files |
 
 ### Conventions and patterns
 - **Data-driven tuning:** weapon, perk, economy, armour and power-up numbers are in `shared/defs/*.json`. Door costs are in the map files. Constants still in code (RoundManager curves, player speed, zombie timings, box timings) live in the Java sim; the few the client needs are mirrored in `game/defs.ts`. Never inline numbers.
@@ -129,7 +129,7 @@ WASD/arrows move · mouse aims · Space or left click fires · R reload · E int
 
 ## Assets
 - Soundtrack: `client/public/audio/tracks/NN-slug.mp3` (20 tracks). These were split from one long mix with ffmpeg stream copy (`-c copy`, ID3 title tags). They shuffle without repeats; `tracks.ts` is the playlist. Paths use `import.meta.env.BASE_URL`.
-- Both Dockerfiles use BuildKit cache mounts (`boarded-up-gradle` for the Gradle home, with `--build-cache`; `boarded-up-npm` for npm). These survive source changes, so `docker compose up --build` doesn't download Gradle or dependencies again. `docker builder prune` clears them.
+- Both Dockerfiles use BuildKit cache mounts (`top-down-survival-gradle` for the Gradle home, with `--build-cache`; `top-down-survival-npm` for npm). These survive source changes, so `docker compose up --build` doesn't download Gradle or dependencies again. `docker builder prune` clears them.
 - Vite copies everything in `public/` into the build and the Docker image, so keep large unused files out of it.
 
 ## Testing without a browser
@@ -163,7 +163,9 @@ Visuals, lighting and audio have **not** been checked in a real browser by an ag
 
 15. **Admin portal:** `admin/`, a separate client with a map editor (paint tiles and walled rooms, place fixtures and furniture, rooms/windows/doors derived and validated live), saving to the server, the repo, or a download. Compose serves it on :8552. Checked headlessly (round-trips both maps byte-for-byte; jsdom + `@napi-rs/canvas` UI smoke test), not yet in a real browser.
 
-Names (perks, power-ups, "Boarded Up") are deliberately original; keep it that way rather than copying names from existing games.
+16. **Renamed to Top Down Survival** (was "Boarded Up"): the title logo, page titles, Java packages (`com.topdownsurvival`), the `top-down-survival.*` config prefix, the Postgres db/user (`topdownsurvival`), image and cache names, and the compose project (`name: top-down-survival`, so the old `top-down-zombie_db-data` volume was left behind rather than reused). `localStorage` keys are `top-down-survival-*`; `core/storage.ts` `loadStored` moves a value saved under the old `boarded-up-*` key the first time it's read.
+
+Names (perks, power-ups, "Top Down Survival") are deliberately original; keep it that way rather than copying names from existing games.
 
 ## Backend roadmap
 The user chose an **authoritative Java server**: the server runs the simulation and browsers only send input and render.
