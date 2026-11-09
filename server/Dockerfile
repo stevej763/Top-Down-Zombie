@@ -10,7 +10,7 @@ COPY shared shared
 WORKDIR /src/server
 # The cache mount keeps the Gradle home (wrapper distribution, dependencies, build cache) between
 # builds. It isn't part of any layer, so it survives source changes that rebuild this one.
-RUN --mount=type=cache,id=boarded-up-gradle,target=/home/gradle/.gradle \
+RUN --mount=type=cache,id=top-down-survival-gradle,target=/home/gradle/.gradle \
     ./gradlew :app:bootJar --no-daemon --build-cache -q
 
 # --- Runtime stage ---

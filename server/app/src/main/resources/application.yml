@@ -1,10 +1,10 @@
 spring:
   application:
-    name: boarded-up
+    name: top-down-survival
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/boardedup}
-    username: ${DB_USER:boardedup}
-    password: ${DB_PASSWORD:boardedup}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/topdownsurvival}
+    username: ${DB_USER:topdownsurvival}
+    password: ${DB_PASSWORD:topdownsurvival}
   jpa:
     open-in-view: false
     hibernate:
@@ -21,7 +21,7 @@ management:
       exposure:
         include: health
 
-boarded-up:
+top-down-survival:
   # Origins allowed to call the API directly. The Vite dev server proxies /api, so this is only
   # needed when the client is served from somewhere else.
   cors-origins: ${CORS_ORIGINS:http://localhost:5173}
