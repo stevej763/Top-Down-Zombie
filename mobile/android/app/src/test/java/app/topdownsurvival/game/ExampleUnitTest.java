@@ -1,4 +1,4 @@
-package com.getcapacitor.myapp;
+package app.topdownsurvival.game;
 
 import static org.junit.Assert.*;
 

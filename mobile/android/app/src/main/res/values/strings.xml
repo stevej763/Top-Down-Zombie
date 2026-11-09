@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Boarded Up</string>
-    <string name="title_activity_main">Boarded Up</string>
+    <string name="app_name">Top Down Survival</string>
+    <string name="title_activity_main">Top Down Survival</string>
     <string name="package_name">app.topdownsurvival.game</string>
     <string name="custom_url_scheme">app.topdownsurvival.game</string>
 </resources>

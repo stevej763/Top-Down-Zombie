@@ -1,4 +1,4 @@
-# Boarded Up mobile (iOS / Android)
+# Top Down Survival mobile (iOS / Android)
 
 The phone version of the game: a Vite app that imports the game from `../client/src` and adds
 twin-stick touch controls, wrapped in native shells with [Capacitor](https://capacitorjs.com).
