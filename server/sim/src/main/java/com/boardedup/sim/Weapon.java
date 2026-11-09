@@ -25,15 +25,29 @@ public final class Weapon {
     }
 
     public double damage() {
-        return def.damage() * defs.upgrade.damage().get(tier);
+        var mults = def.upgradeDamage() != null ? def.upgradeDamage() : defs.upgrade.damage();
+        return def.damage() * mults.get(tier);
+    }
+
+    /** Holding one in each hand. */
+    public boolean akimbo() {
+        return def.akimbo() != null && tier >= def.akimbo().fromTier();
+    }
+
+    public double fireInterval() {
+        return def.fireInterval() * (akimbo() ? def.akimbo().fireInterval() : 1);
     }
 
     public int magSize() {
-        return (int) Math.round(def.mag() * defs.upgrade.ammo().get(tier));
+        return (int) Math.round(def.mag() * ammoMult());
     }
 
     public int reserveSize() {
-        return (int) Math.round(def.reserve() * defs.upgrade.ammo().get(tier));
+        return (int) Math.round(def.reserve() * ammoMult());
+    }
+
+    private double ammoMult() {
+        return defs.upgrade.ammo().get(tier) * (akimbo() ? def.akimbo().ammo() : 1);
     }
 
     /** Upgraded weapons cost more to refill at the wall. */

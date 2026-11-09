@@ -24,12 +24,19 @@ public final class Defs {
             /** How many zombies one bullet can pass through. */
             int penetration,
             /** Area damage where the shot ends; null for most guns. */
-            Splash splash) {
+            Splash splash,
+            /** Damage multiplier per upgrade tier, in place of the shared one; null for most guns. */
+            List<Double> upgradeDamage,
+            /** Dual-wielded from an upgrade tier on; null for most guns. */
+            Akimbo akimbo) {
         public record Splash(double radius, double damage) {}
+
+        /** From {@code fromTier}, mag and reserve are multiplied by {@code ammo} and the fire interval by {@code fireInterval}. */
+        public record Akimbo(int fromTier, double ammo, double fireInterval) {}
 
         WeaponDef withId(String id) {
             return new WeaponDef(id, name, cost, ammoCost, damage, pellets, spread, fireInterval, auto, mag, reserve,
-                    reloadTime, range, penetration, splash);
+                    reloadTime, range, penetration, splash, upgradeDamage, akimbo);
         }
     }
 

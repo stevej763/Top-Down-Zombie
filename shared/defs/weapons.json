@@ -1,6 +1,7 @@
 {
   "weapons": {
-    "pistol": { "name": "Pistol", "cost": 0, "ammoCost": 0, "damage": 25, "pellets": 1, "spread": 0.03, "fireInterval": 0.25, "auto": false, "mag": 8, "reserve": 80, "reloadTime": 1.2, "range": 600, "penetration": 1 },
+    "pistol": { "name": "Pistol", "cost": 0, "ammoCost": 0, "damage": 25, "pellets": 1, "spread": 0.03, "fireInterval": 0.25, "auto": false, "mag": 8, "reserve": 80, "reloadTime": 1.2, "range": 600, "penetration": 1,
+      "upgradeDamage": [1, 2.5, 4.5], "akimbo": { "fromTier": 1, "ammo": 2, "fireInterval": 0.6 } },
     "shotgun": { "name": "Shotgun", "cost": 1000, "ammoCost": 500, "damage": 18, "pellets": 7, "spread": 0.38, "fireInterval": 0.9, "auto": false, "mag": 6, "reserve": 36, "reloadTime": 2.4, "range": 260, "penetration": 1 },
     "smg": { "name": "SMG", "cost": 1200, "ammoCost": 600, "damage": 20, "pellets": 1, "spread": 0.07, "fireInterval": 0.07, "auto": true, "mag": 30, "reserve": 180, "reloadTime": 1.8, "range": 500, "penetration": 1 },
     "rifle": { "name": "Rifle", "cost": 1500, "ammoCost": 750, "damage": 50, "pellets": 1, "spread": 0.02, "fireInterval": 0.12, "auto": true, "mag": 24, "reserve": 144, "reloadTime": 2.0, "range": 800, "penetration": 2 },

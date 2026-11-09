@@ -34,6 +34,10 @@ export interface WeaponDef {
   penetration: number;
   /** Area damage where the shot ends. */
   splash?: { radius: number; damage: number };
+  /** Damage multiplier per upgrade tier, in place of the shared one. */
+  upgradeDamage?: number[];
+  /** Dual-wielded from `fromTier` on: ammo and fire interval are multiplied. */
+  akimbo?: { fromTier: number; ammo: number; fireInterval: number };
 }
 
 export interface PerkDef {
@@ -92,12 +96,22 @@ export function weaponName(id: WeaponId, tier: number): string {
   return WEAPONS[id].name + UPGRADE.suffix[tier];
 }
 
+/** Holding one in each hand (the upgraded pistol). */
+export function isAkimbo(id: WeaponId, tier: number): boolean {
+  const a = WEAPONS[id].akimbo;
+  return !!a && tier >= a.fromTier;
+}
+
+function ammoMult(id: WeaponId, tier: number): number {
+  return UPGRADE.ammo[tier] * (isAkimbo(id, tier) ? WEAPONS[id].akimbo!.ammo : 1);
+}
+
 export function magSize(id: WeaponId, tier: number): number {
-  return Math.round(WEAPONS[id].mag * UPGRADE.ammo[tier]);
+  return Math.round(WEAPONS[id].mag * ammoMult(id, tier));
 }
 
 export function reserveSize(id: WeaponId, tier: number): number {
-  return Math.round(WEAPONS[id].reserve * UPGRADE.ammo[tier]);
+  return Math.round(WEAPONS[id].reserve * ammoMult(id, tier));
 }
 
 /** Upgraded weapons cost more to refill at the wall. */

@@ -238,8 +238,11 @@ class GameSimTest {
         Weapon w = player(s).weapon();
         assertThat(w.tier).isEqualTo(1);
         assertThat(w.name()).isEqualTo("Pistol Mk II");
-        assertThat(w.damage()).isEqualTo(25 * 1.75);
-        assertThat(w.mag).isEqualTo(12);
+        // The pistol has its own damage curve and goes akimbo: twice the ammo, firing faster.
+        assertThat(w.damage()).isEqualTo(25 * 2.5);
+        assertThat(w.akimbo()).isTrue();
+        assertThat(w.mag).isEqualTo(24);
+        assertThat(w.fireInterval()).isCloseTo(0.25 * 0.6, within(1e-9));
         assertThat(player(s).economy.points).isEqualTo(20000 - 3000);
     }
 
