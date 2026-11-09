@@ -6,7 +6,7 @@ import { Keyboard, type KeySink } from './keyboard';
 
 /** Below this share of the stick's reach a thumb is resting, not pushing. */
 const DEADZONE = 0.3;
-/** Pushing the aim stick past this share of its reach fires. */
+/** Pushing the aim stick past this share of its reach fires, and keeps firing while held (semi-autos too). */
 const FIRE_AT = 0.55;
 /** How far ahead of the player (view px) the virtual mouse sits, so `Game.readInput` aims along the stick. */
 const AIM_DIST = 120;
@@ -22,7 +22,8 @@ type Binding =
 /**
  * Twin-stick touch controls, turned into the keys and mouse `Game` already reads: the left stick
  * holds WASD, the right stick moves the mouse around the player (and holds the button down when
- * pushed far), buttons press their keys, and outside play a tap is a click.
+ * pushed far, re-pressing it every tick so semi-autos keep firing at their own rate), buttons press
+ * their keys, and outside play a tap is a click.
  */
 export class TouchInput extends Input implements KeySink {
   private game: Game | null = null;
@@ -220,8 +221,11 @@ export class TouchInput extends Input implements KeySink {
 
   override endTick(): void {
     super.endTick();
-    if (this.playing) this.aimMouse();
-    else this.releasePlay();
+    if (this.playing) {
+      // A held stick pulls the trigger again each tick; the gun's fire interval sets the pace.
+      if (this.firing) this.mousePressed = true;
+      this.aimMouse();
+    } else this.releasePlay();
   }
 
   // ---------------------------------------------------------------- drawing
