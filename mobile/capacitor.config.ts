@@ -7,7 +7,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const devUrl = process.env.CAP_DEV_URL;
 
 const config: CapacitorConfig = {
-  appId: 'com.boardedup.game',
+  appId: 'app.topdownsurvival.game',
   appName: 'Boarded Up',
   webDir: 'dist',
   backgroundColor: '#000000',
