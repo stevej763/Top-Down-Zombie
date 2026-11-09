@@ -228,7 +228,7 @@ public final class GameSim {
     void fire(Player p, Weapon w) {
         Defs.WeaponDef def = w.def;
         w.mag--;
-        w.cooldown = def.fireInterval() * p.fireIntervalMult();
+        w.cooldown = w.fireInterval() * p.fireIntervalMult();
 
         double base = AimAssist.apply(this, p.x, p.y, p.aim, def.range());
         for (int i = 0; i < def.pellets(); i++) {

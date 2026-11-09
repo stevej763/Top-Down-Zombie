@@ -1,6 +1,6 @@
 import { rand, TAU } from '../core/math';
 import {
-  BLEEDOUT, KNIFE, PERKS, PLAYER_RADIUS, REVIVE_TIME, WEAPONS, ZOMBIE_RADIUS, type PerkDef, type WeaponDef,
+  BLEEDOUT, isAkimbo, KNIFE, PERKS, PLAYER_RADIUS, REVIVE_TIME, WEAPONS, ZOMBIE_RADIUS, type PerkDef, type WeaponDef,
 } from '../game/defs';
 import { Tile, TILE } from '../game/TileMap';
 import { shadowText } from '../ui/text';
@@ -9,7 +9,7 @@ import { drawFloorDecor, drawFurniture, furnitureTiles } from './furniture';
 import type { Fixture, LightArea, WindowFixture } from '../view/Level';
 import { heldWeapon, type DropView, type InteractableView, type PlayerView, type ZombieView } from '../view/WorldView';
 import {
-  LOCAL_BODY, PERK_VISUALS, POWERUP_VISUALS, TEAM_BODIES, WEAPON_FX, type PlayerFx, type ZombieFx,
+  AKIMBO_OFFSET, LOCAL_BODY, PERK_VISUALS, POWERUP_VISUALS, TEAM_BODIES, WEAPON_FX, type PlayerFx, type ZombieFx,
 } from './visuals';
 
 /** Pre-render the static map (floors, decor, walls, furniture, crates, yard) to an offscreen canvas. */
@@ -460,6 +460,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: PlayerView, anim: P
   const w = heldWeapon(p);
   const wfx = WEAPON_FX[w.id];
   const barrel = wfx.barrel;
+  const akimbo = isAkimbo(w.id, w.tier);
   const body = bodyOf(p, local);
 
   ctx.save();
@@ -472,12 +473,22 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: PlayerView, anim: P
   if (p.invuln > 0 && Math.floor(p.invuln * 12) % 2 === 0) ctx.globalAlpha = 0.4;
   ctx.rotate(p.aim);
   ctx.fillStyle = TIER_COLORS[w.tier];
-  ctx.fillRect(6, -2.5, barrel + 8, 5);
-  ctx.fillStyle = '#d9a877';
-  ctx.beginPath();
-  ctx.arc(9, -4, 3, 0, TAU);
-  ctx.arc(11, 3.5, 3, 0, TAU);
-  ctx.fill();
+  if (akimbo) {
+    // One gun in each hand, held a little apart.
+    for (const s of [-1, 1]) ctx.fillRect(6, s * AKIMBO_OFFSET - 2, barrel + 8, 4);
+    ctx.fillStyle = '#d9a877';
+    ctx.beginPath();
+    ctx.arc(9, -AKIMBO_OFFSET, 3, 0, TAU);
+    ctx.arc(9, AKIMBO_OFFSET, 3, 0, TAU);
+    ctx.fill();
+  } else {
+    ctx.fillRect(6, -2.5, barrel + 8, 5);
+    ctx.fillStyle = '#d9a877';
+    ctx.beginPath();
+    ctx.arc(9, -4, 3, 0, TAU);
+    ctx.arc(11, 3.5, 3, 0, TAU);
+    ctx.fill();
+  }
 
   ctx.fillStyle = body.fill;
   ctx.strokeStyle = body.stroke;
@@ -518,6 +529,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: PlayerView, anim: P
   if (anim.flash > 0) {
     const mx = 14 + barrel + 4;
     const s = wfx.flashSize;
+    if (akimbo) ctx.translate(0, anim.hand * AKIMBO_OFFSET);
     ctx.fillStyle = `rgb(${wfx.flash})`;
     ctx.beginPath();
     ctx.moveTo(mx - 3 * s, -4 * s);

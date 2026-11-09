@@ -9,9 +9,9 @@ import {
 } from '../render/draw';
 import { Lighting } from '../render/lighting';
 import {
-  PERK_VISUALS, POWERUP_VISUALS, TIER_HALO, WEAPON_FX, type PlayerFx, type ZombieFx,
+  AKIMBO_OFFSET, PERK_VISUALS, POWERUP_VISUALS, TIER_HALO, WEAPON_FX, type PlayerFx, type ZombieFx,
 } from '../render/visuals';
-import { KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../game/defs';
+import { isAkimbo, KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../game/defs';
 import { NO_INPUT, type PlayerInput } from '../game/input';
 import type { MapDoc } from '../game/MapData';
 import { Leaderboard } from '../systems/HighScore';
@@ -228,7 +228,7 @@ export class Game {
   playerFxOf(id: number): PlayerFx {
     let fx = this.playerFx.get(id);
     if (!fx) {
-      fx = { flash: 0, hurtFlash: 0, knifeSwing: 0 };
+      fx = { flash: 0, hurtFlash: 0, knifeSwing: 0, hand: 1 };
       this.playerFx.set(id, fx);
     }
     return fx;
@@ -571,8 +571,14 @@ export class Game {
     switch (e.type) {
       case 'shot': {
         const wfx = WEAPON_FX[e.weapon];
-        if (wfx.casing) this.particles.casing(e.x + Math.cos(e.aim) * 12, e.y + Math.sin(e.aim) * 12, e.aim, wfx.casing);
-        this.playerFxOf(e.player).flash = 0.05;
+        const fx = this.playerFxOf(e.player);
+        // Akimbo guns take turns; the tracer that follows comes from the same hand.
+        fx.hand = isAkimbo(e.weapon, e.tier) ? -fx.hand : 1;
+        const side = isAkimbo(e.weapon, e.tier) ? fx.hand * AKIMBO_OFFSET : 0;
+        const cx = e.x + Math.cos(e.aim) * 12 - Math.sin(e.aim) * side;
+        const cy = e.y + Math.sin(e.aim) * 12 + Math.cos(e.aim) * side;
+        if (wfx.casing) this.particles.casing(cx, cy, e.aim, wfx.casing);
+        fx.flash = 0.05;
         if (mine) this.camera.addShake(wfx.shake);
         sound.shot(e.weapon, mine ? 1 : this.volumeAt(e.x, e.y));
         break;
@@ -584,7 +590,8 @@ export class Game {
         const dx = len > 0 ? (e.x2 - e.x1) / len : 0;
         const dy = len > 0 ? (e.y2 - e.y1) / len : 0;
         const m = Math.min(len, PLAYER_RADIUS + wfx.barrel + 6);
-        this.particles.tracer(e.x1 + dx * m, e.y1 + dy * m, e.x2, e.y2, wfx, TIER_HALO[e.tier]);
+        const side = isAkimbo(e.weapon, e.tier) ? this.playerFxOf(e.player).hand * AKIMBO_OFFSET : 0;
+        this.particles.tracer(e.x1 + dx * m - dy * side, e.y1 + dy * m + dx * side, e.x2, e.y2, wfx, TIER_HALO[e.tier]);
         // Back the mark off the wall face so it sits on the visible side.
         if (e.hitWall) this.particles.impact(e.x2 - dx * 1.5, e.y2 - dy * 1.5, Math.atan2(dy, dx) + Math.PI, wfx.tracer);
         break;

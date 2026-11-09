@@ -87,10 +87,15 @@ export const TEAM_BODIES = [
   { fill: '#8c7a2e', stroke: '#423813' },
 ];
 
+/** Sideways offset of each akimbo gun from the aim line, in px. */
+export const AKIMBO_OFFSET = 6;
+
 /** Client-side animation state for one player, driven by sim events. `hurtFlash` is only used for the local player. */
 export interface PlayerFx {
   /** Muzzle-flash timer. */
   flash: number;
+  /** Which akimbo gun fired last: 1 = right hand, -1 = left. */
+  hand: number;
   hurtFlash: number;
   /** Time left in the current knife swing animation. */
   knifeSwing: number;
