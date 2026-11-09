@@ -5,6 +5,7 @@ Browser game: the player defends a boarded-up house against rounds of zombies. Z
 **Stack:**
 - **Client (`client/`):** vanilla Canvas 2D + TypeScript + Vite. No game framework and no runtime dependencies. All art is procedural (drawn in code). All sound effects are synthesized with WebAudio. The only assets are the soundtrack mp3s.
 - **Admin portal (`admin/`):** a second Vite + TypeScript client, the map editor. It imports the game's map types and drawing straight from `../client/src`. See **Admin portal** below.
+- **Mobile (`mobile/`):** iOS/Android apps. A third Vite + TypeScript client that imports the whole game from `../client/src` and adds twin-stick touch controls, wrapped with Capacitor (`ios/`, `android/`; app id `app.topdownsurvival.game`, landscape only). See **Mobile** below.
 - **Server (`server/`):** Java 25 + Spring Boot 4 (Gradle Kotlin DSL) + PostgreSQL, with Flyway migrations.
 - **The server is authoritative.** The game simulation is `server/sim` (Java). Every game, solo included, runs in a server room; browsers send input over `/ws` and render snapshots. See **Netcode** below.
 - **Gameplay tuning** lives in `shared/defs/*.json`. The Java sim plays by it; the client reads it for names, prices, ammo counts and drawing.
@@ -19,6 +20,8 @@ cd client && npm run build     # tsc --noEmit + vite build → dist/  (use this 
 cd client && npm run render-maps  # maps/*.json → docs/maps/<id>.png (rerun and commit after editing a map)
 cd admin && npm run dev        # map editor on http://localhost:5174; proxies /api to localhost:8080 (API_TARGET=http://localhost:8551 for compose)
 cd admin && npm run build      # its type-check (also type-checks the client files it imports)
+cd mobile && npm run dev       # touch client on http://localhost:5175 (and the LAN); proxies /api and /ws (API_TARGET as for admin)
+cd mobile && npm run build     # its type-check; VITE_SERVER_URL=https://<server> npm run sync builds and copies into ios/ and android/
 docker compose up -d --build   # db + server + web (nginx) on http://localhost:8551, admin on :8552 (Gradle/npm caches persist; see Assets)
 ```
 
@@ -58,7 +61,7 @@ The client has no test suite or linter; its only dev dependencies are TypeScript
 | `src/test/` | `ApiIntegrationTest`, `MapApiTest`, `GameSocketIT` (real sockets with `BotClient`): Spring Boot + Testcontainers Postgres. `GameRoomTest`, `LobbyServiceTest`, `SnapshotBuilderTest`: plain unit tests with `FakeConnection` and a manual clock. `LoadTrialIT` runs only with `LOAD_TRIAL=1` |
 | `server/sim/src/test/` | `GameSimTest` (the feature checks: low furniture, doors, perks, Tough Hide, Second Wind, armour, upgrades, box, power switch, power-ups, plasma splash, knife, rebuild cap, determinism, bot survival), `CoopSimTest` (multi-player: separate economies, targeting, multi-source flow field, downed/revive/bleed-out/respawn, box owner, shared power-ups, party scaling, event JSON), `SimParityTest`, `RngTest`, `MapValidatorTest` |
 
-Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS`, `ADMIN_TOKEN`, and the dev-only `DEBUG_LATENCY_MS` (delays `/ws` messages each way).
+Config comes from env vars: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS` (REST and `/ws`; compose adds the app origins `capacitor://localhost` and `https://localhost`), `ADMIN_TOKEN`, and the dev-only `DEBUG_LATENCY_MS` (delays `/ws` messages each way).
 
 ### Maps (`maps/*.json`)
 - Each file is a map document named `<id>.json` (`MapDoc` in `server/sim/.../map/`, mirrored by `client/src/game/MapData.ts`). Tile rows are strings: `.` outside, `_` floor, `#` wall, `W` window, `C` crate (tall: blocks walking and bullets), `D` door, `T` low furniture (`Tile.LOW`: blocks walking, bullets pass over; zombies only direct-chase along `TileMap.hasWalkLine`, which it blocks).
@@ -90,6 +93,19 @@ A separate client for admin tools; for now only the map editor. DOM panels aroun
 - Keys: V/B/R/O/G/P/U/E tools, 1-7 tiles, Alt+click eyedropper, Q turns furniture, Delete, Ctrl+Z / Ctrl+Shift+Z, Ctrl+S save to server, F fit, C clean view, space/right/middle-drag pan, wheel zoom.
 - `client/src` files the editor imports must stay free of game-only globals at import time (they're bundled into the admin build).
 
+## Mobile (mobile/)
+The phone client; `mobile/README.md` has the dev, live-reload and release steps. It reuses `Game` unchanged through a few seams in `client/src`:
+- `net/server.ts`: `apiUrl`/`wsUrl` use `VITE_SERVER_URL` when set (the app's WebView origin isn't the server), the page's origin otherwise.
+- `Game` takes an optional `Input` (5th constructor argument), has `showCrosshair` and an `eventHook` (haptics). `Input`'s `down`/`pressed` are `protected`.
+- `ui/keys.ts` `controlText`: every key name the UI shows (prompts, reload warning, game over, menu hints, the Controls page). Mobile swaps in its button names. **Don't write key names into UI strings; add them here.**
+
+| Path | Role |
+|---|---|
+| `src/TouchInput.ts` | Extends `Input`. Floating left stick → WASD (8 directions, so `PlayerMotion` prediction stays exact); right stick → the mouse 120 px ahead of the player, fire held past 55%; aim follows movement while the right thumb is off. USE/R/KNIFE/SWAP/II buttons press keys. Outside play a tap is a click; leaving play releases everything |
+| `src/controls.ts`, `src/keyboard.ts`, `src/native.ts` | Layout and drawing of the overlay canvas (safe-area aware); a hidden `<input>` for the phone keyboard on the name/code pages; Capacitor glue (status bar, keep awake, pause on background, Android back = Esc, haptics) |
+
+Not yet run on a device or simulator (headless smoke test only: fake touches through `Game.readInput`). Icons and splash are Capacitor defaults.
+
 ## Client architecture (client/src/)
 
 | Path | Role |
@@ -112,7 +128,7 @@ A separate client for admin tools; for now only the map editor. DOM panels aroun
 | `render/furniture.ts` | Map `decor` for the pre-render: floor finishes (`checker`, `carpet`, `tile`, `concrete`, `straw`), rugs and stains, and furniture pieces (sofa, bed, counters, car, tractor, hay, piano, generator, ...), each drawn front-down in a local frame then rotated to its `face` |
 | `render/draw.ts` | All procedural drawing from views: map pre-render (`renderMap(MapData)`, with decor), zombies, players (`drawPlayer`: local blue, teammates by id, downed lying down, dead not drawn; `drawPlayerOverlay` after lighting: name tags, bleed-out ring), windows, interactables (`drawInteractable`, `drawInteractableOverlay`, switching on `Fixture.kind`), power-ups. `render/lighting.ts` draws the darkness overlay with punched-out lights (a small glow per player, and a torch cone per living player, ray-cast so it stops at walls and closed doors with 15% leaking through, and at crates and tall furniture with 55% getting past, and off once the room lights are on) and the coloured machine glows. `render/visuals.ts` holds the visual-only tables and the `PlayerFx`/`ZombieFx` types |
 | `ui/Menu.ts` | Title and pause menus: pages (main / high scores / audio / controls / name / maps / mode / join / lobby) of buttons, sliders, toggles and text fields, keyboard and mouse driven. Item rects come from one `rects()` used by both update and draw. New Game asks for a name the first time, then map select (if more than one map), then Play Solo / Host Co-op. Join Game takes a 4-letter code. The lobby shows the code, the seats (host / ready / away), Start for the host and a Ready toggle for others; Esc leaves the room. `fail(msg)` / `done()` end the wait for the server. High Scores flips maps with ←/→ |
-| `ui/HUD.ts`, `ui/Screens.ts`, `ui/prompts.ts`, `ui/text.ts` | HUD (round, points, ammo, perks, armour, prompts, banners, now-playing toast), the game-over screen, and interaction prompt text |
+| `ui/HUD.ts`, `ui/Screens.ts`, `ui/prompts.ts`, `ui/text.ts`, `ui/keys.ts` | HUD (round, points, ammo, perks, armour, prompts, banners, now-playing toast), the game-over screen, interaction prompt text, and the control names they show (`controlText`) |
 | `audio/Sound.ts` | A singleton `sound` that synthesizes every SFX and plays the shuffled soundtrack. The AudioContext is created lazily on the first user gesture (`unlock()`). Master/music/effects volumes and mute persist under `boarded-up-audio`; SFX go through their own gain bus. `audio/tracks.ts` lists the soundtrack files |
 
 ### Conventions and patterns
@@ -163,6 +179,8 @@ Visuals, lighting and audio have **not** been checked in a real browser by an ag
 
 15. **Admin portal:** `admin/`, a separate client with a map editor (paint tiles and walled rooms, place fixtures and furniture, rooms/windows/doors derived and validated live), saving to the server, the repo, or a download. Compose serves it on :8552. Checked headlessly (round-trips both maps byte-for-byte; jsdom + `@napi-rs/canvas` UI smoke test), not yet in a real browser.
 
+16. **Mobile:** `mobile/`, twin-stick touch controls over the shared client, Capacitor iOS/Android shells (landscape, app id `app.topdownsurvival.game`). Checked headlessly, not yet on a device.
+
 Names (perks, power-ups, "Boarded Up") are deliberately original; keep it that way rather than copying names from existing games.
 
 ## Backend roadmap
@@ -173,4 +191,4 @@ The user chose an **authoritative Java server**: the server runs the simulation 
 4. ~~Co-op over WebSocket~~ (done; the plan and as-built notes for M1–M5 are in `docs/phase4-coop.md`). Lobbies by room code (max 4), solo through the same rooms.
 
 ## Possible next steps (not started)
-Gamepad support · zombie variety (dogs/bosses) · a teddy-bear style box relocation · an aim-assist toggle in the menu · persistent stats · mobile/touch controls.
+Gamepad support · zombie variety (dogs/bosses) · a teddy-bear style box relocation · an aim-assist toggle in the menu · persistent stats · app icons and store listings for the mobile apps.
