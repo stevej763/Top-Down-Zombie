@@ -1,4 +1,4 @@
-import { TILE, TileMap } from '../game/TileMap';
+import { Tile, TILE, TileMap, type SolidFn } from '../game/TileMap';
 import type { Level } from '../view/Level';
 import { heldWeapon, type WorldView } from '../view/WorldView';
 import { glowOf, WEAPON_FX, type PlayerFx } from './visuals';
@@ -11,7 +11,9 @@ const FLASHLIGHT_RAYS = 120;
 /** How far the beam reaches into the wall it stops at, so the wall's face is lit. */
 const FLASHLIGHT_WALL_BLEED = 10;
 /** Share of the torch that shows through walls, so you can just make out rooms you haven't opened. */
-const FLASHLIGHT_LEAK = 0.1;
+const FLASHLIGHT_LEAK = 0.15;
+/** Share that shows past crates, hay and other tall furniture inside a room. */
+const FLASHLIGHT_PAST_FURNITURE = 0.55;
 /** The small glow around every player, so the floor at their feet is never pitch black. */
 const PLAYER_GLOW_RADIUS = 55;
 const PLAYER_GLOW = 0.75;
@@ -25,6 +27,9 @@ const LAMP_RADIUS = 6 * TILE;
 const ROOM_LIGHT_STRENGTH = 0.92;
 /** Warm tint the lights add on top. */
 const ROOM_TINT = 0.07;
+
+/** Walls and closed doors: what stops the torch apart from furniture. */
+const blocksLight: SolidFn = (t) => t === Tile.Wall || t === Tile.Door;
 
 /** Darkness overlay with lights punched out of it (each player's glow and torch, windows, room lights). */
 export class Lighting {
@@ -75,15 +80,27 @@ export class Lighting {
         g.addColorStop(0.7, `rgba(0, 0, 0, ${0.6 * torch})`);
         g.addColorStop(1, 'rgba(0, 0, 0, 0)');
         c.fillStyle = g;
-        // A faint copy of the whole cone leaks through walls; the traced beam goes on top.
-        c.globalAlpha = FLASHLIGHT_LEAK;
+        // Three bands that don't overlap: past walls the torch shows faintly, past furniture more,
+        // and up to the first thing in the way at full strength. Each band is the outer shape minus
+        // the inner one (even-odd), and every shape contains the next.
+        const map = level.data.map;
+        const pastFurniture = this.torchReach(map, p.x, p.y, p.aim, blocksLight);
+        const beam = this.torchReach(map, p.x, p.y, p.aim, TileMap.blocksBullets);
         c.beginPath();
         c.moveTo(px, py);
         c.arc(px, py, FLASHLIGHT_RANGE, p.aim - FLASHLIGHT_HALF_ANGLE, p.aim + FLASHLIGHT_HALF_ANGLE);
         c.closePath();
-        c.fill();
+        this.torchShape(px, py, p.aim, pastFurniture);
+        c.globalAlpha = FLASHLIGHT_LEAK;
+        c.fill('evenodd');
+        c.beginPath();
+        this.torchShape(px, py, p.aim, pastFurniture);
+        this.torchShape(px, py, p.aim, beam);
+        c.globalAlpha = FLASHLIGHT_PAST_FURNITURE;
+        c.fill('evenodd');
+        c.beginPath();
+        this.torchShape(px, py, p.aim, beam);
         c.globalAlpha = 1;
-        this.torchShape(level.data.map, p.x, p.y, p.aim, camX, camY);
         c.fill();
       }
     }
@@ -164,19 +181,25 @@ export class Lighting {
     return canvas;
   }
 
-  /** The torch cone as a path, cut short wherever a wall, crate or closed door blocks it (windows and open doors let it through). */
-  private torchShape(map: TileMap, x: number, y: number, aim: number, camX: number, camY: number): void {
-    const c = this.ctx;
-    c.beginPath();
-    c.moveTo(x - camX, y - camY);
+  /** How far the torch reaches along each of its rays before the first tile `blocks` accepts (windows and open doors let it through). */
+  private torchReach(map: TileMap, x: number, y: number, aim: number, blocks: SolidFn): number[] {
+    const reach: number[] = [];
     for (let i = 0; i <= FLASHLIGHT_RAYS; i++) {
       const a = aim - FLASHLIGHT_HALF_ANGLE + (2 * FLASHLIGHT_HALF_ANGLE * i) / FLASHLIGHT_RAYS;
-      const dx = Math.cos(a);
-      const dy = Math.sin(a);
-      const hit = map.rayTo(x, y, dx, dy, FLASHLIGHT_RANGE, TileMap.blocksBullets);
-      const d = Math.min(FLASHLIGHT_RANGE, hit + (hit < FLASHLIGHT_RANGE ? FLASHLIGHT_WALL_BLEED : 0));
-      c.lineTo(x + dx * d - camX, y + dy * d - camY);
+      const hit = map.rayTo(x, y, Math.cos(a), Math.sin(a), FLASHLIGHT_RANGE, blocks);
+      reach.push(Math.min(FLASHLIGHT_RANGE, hit + (hit < FLASHLIGHT_RANGE ? FLASHLIGHT_WALL_BLEED : 0)));
     }
+    return reach;
+  }
+
+  /** Adds the torch cone, cut to `reach`, to the current path (in screen space). */
+  private torchShape(x: number, y: number, aim: number, reach: number[]): void {
+    const c = this.ctx;
+    c.moveTo(x, y);
+    reach.forEach((d, i) => {
+      const a = aim - FLASHLIGHT_HALF_ANGLE + (2 * FLASHLIGHT_HALF_ANGLE * i) / FLASHLIGHT_RAYS;
+      c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d);
+    });
     c.closePath();
   }
 
