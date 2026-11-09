@@ -1,4 +1,4 @@
-import { TILE } from '../game/TileMap';
+import { TILE, TileMap } from '../game/TileMap';
 import type { Level } from '../view/Level';
 import { heldWeapon, type WorldView } from '../view/WorldView';
 import { glowOf, WEAPON_FX, type PlayerFx } from './visuals';
@@ -6,6 +6,10 @@ import { glowOf, WEAPON_FX, type PlayerFx } from './visuals';
 const DARKNESS = 'rgba(4, 5, 10, 0.86)';
 const FLASHLIGHT_RANGE = 430;
 const FLASHLIGHT_HALF_ANGLE = 0.5;
+/** Rays cast across the torch cone to stop it at walls. */
+const FLASHLIGHT_RAYS = 120;
+/** How far the beam reaches into the wall it stops at, so the wall's face is lit. */
+const FLASHLIGHT_WALL_BLEED = 10;
 /** "r, g, b" of the room lights. */
 const ROOM_LIGHT = '255, 225, 170';
 /** How much of the darkness the room lights lift: evenly across a room, and extra under each lamp. */
@@ -17,7 +21,7 @@ const ROOM_LIGHT_STRENGTH = 0.92;
 /** Warm tint the lights add on top. */
 const ROOM_TINT = 0.07;
 
-/** Darkness overlay with lights punched out of it (each player's glow and flashlight cone, windows, room lights). */
+/** Darkness overlay with lights punched out of it (each player's torch, windows, room lights). */
 export class Lighting {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -51,26 +55,23 @@ export class Lighting {
       c.globalAlpha = 1;
     }
 
-    // Everyone carries a light; a downed player's torch has dropped, so only their glow is left.
+    // The torch is the only light a player gives off: it fades out as the room lights come on,
+    // and a downed player's torch has dropped.
     const lit = world.players.filter((p) => p.state !== 'dead');
-    for (const p of lit) {
-      const px = p.x - camX;
-      const py = p.y - camY;
-      if (p.state === 'downed') {
-        this.glow(px, py, 110, 0.8);
-        continue;
+    const torch = 1 - light;
+    if (torch > 0) {
+      for (const p of lit) {
+        if (p.state !== 'alive') continue;
+        const px = p.x - camX;
+        const py = p.y - camY;
+        const g = c.createRadialGradient(px, py, 20, px, py, FLASHLIGHT_RANGE);
+        g.addColorStop(0, `rgba(0, 0, 0, ${0.95 * torch})`);
+        g.addColorStop(0.7, `rgba(0, 0, 0, ${0.6 * torch})`);
+        g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        c.fillStyle = g;
+        this.torchShape(level.data.map, p.x, p.y, p.aim, camX, camY);
+        c.fill();
       }
-      this.glow(px, py, 150, 0.95);
-      const g = c.createRadialGradient(px, py, 20, px, py, FLASHLIGHT_RANGE);
-      g.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
-      g.addColorStop(0.7, 'rgba(0, 0, 0, 0.6)');
-      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      c.fillStyle = g;
-      c.beginPath();
-      c.moveTo(px, py);
-      c.arc(px, py, FLASHLIGHT_RANGE, p.aim - FLASHLIGHT_HALF_ANGLE, p.aim + FLASHLIGHT_HALF_ANGLE);
-      c.closePath();
-      c.fill();
     }
 
     for (const b of level.windows) this.glow(b.center.x - camX, b.center.y - camY, 110, 0.55);
@@ -147,6 +148,22 @@ export class Lighting {
     }
     this.rooms = canvas;
     return canvas;
+  }
+
+  /** The torch cone as a path, cut short wherever a wall, crate or closed door blocks it (windows and open doors let it through). */
+  private torchShape(map: TileMap, x: number, y: number, aim: number, camX: number, camY: number): void {
+    const c = this.ctx;
+    c.beginPath();
+    c.moveTo(x - camX, y - camY);
+    for (let i = 0; i <= FLASHLIGHT_RAYS; i++) {
+      const a = aim - FLASHLIGHT_HALF_ANGLE + (2 * FLASHLIGHT_HALF_ANGLE * i) / FLASHLIGHT_RAYS;
+      const dx = Math.cos(a);
+      const dy = Math.sin(a);
+      const hit = map.rayTo(x, y, dx, dy, FLASHLIGHT_RANGE, TileMap.blocksBullets);
+      const d = Math.min(FLASHLIGHT_RANGE, hit + (hit < FLASHLIGHT_RANGE ? FLASHLIGHT_WALL_BLEED : 0));
+      c.lineTo(x + dx * d - camX, y + dy * d - camY);
+    }
+    c.closePath();
   }
 
   private glow(x: number, y: number, r: number, strength: number): void {

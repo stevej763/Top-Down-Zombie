@@ -51,6 +51,32 @@ export class TileMap {
     return max;
   }
 
+  /** Exact distance along a normalized ray to the first tile `blocks` accepts (capped at `max`), stepping tile by tile. */
+  rayTo(ox: number, oy: number, dx: number, dy: number, max: number, blocks: SolidFn): number {
+    let tx = Math.floor(ox / TILE);
+    let ty = Math.floor(oy / TILE);
+    const stepX = dx > 0 ? 1 : -1;
+    const stepY = dy > 0 ? 1 : -1;
+    const spanX = dx !== 0 ? TILE / Math.abs(dx) : Infinity;
+    const spanY = dy !== 0 ? TILE / Math.abs(dy) : Infinity;
+    let nextX = dx !== 0 ? (dx > 0 ? (tx + 1) * TILE - ox : ox - tx * TILE) / Math.abs(dx) : Infinity;
+    let nextY = dy !== 0 ? (dy > 0 ? (ty + 1) * TILE - oy : oy - ty * TILE) / Math.abs(dy) : Infinity;
+    let t = 0;
+    while (t < max) {
+      if (blocks(this.get(tx, ty))) return t;
+      if (nextX < nextY) {
+        tx += stepX;
+        t = nextX;
+        nextX += spanX;
+      } else {
+        ty += stepY;
+        t = nextY;
+        nextY += spanY;
+      }
+    }
+    return max;
+  }
+
   hasLOS(ax: number, ay: number, bx: number, by: number): boolean {
     const d = Math.hypot(bx - ax, by - ay);
     if (d < 1) return true;
