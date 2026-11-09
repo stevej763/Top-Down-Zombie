@@ -24,6 +24,8 @@ services:
     environment:
       # Set in a .env file to enable PUT /api/maps/{id}.
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # The web dev server, then the mobile app's WebView origins (iOS, Android).
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,capacitor://localhost,https://localhost}
       DB_URL: jdbc:postgresql://db:5432/topdownsurvival
       DB_USER: topdownsurvival
       DB_PASSWORD: ${DB_PASSWORD:-topdownsurvival}

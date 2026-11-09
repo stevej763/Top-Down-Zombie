@@ -6,6 +6,7 @@ import { ARMOUR_LEVELS, BLEEDOUT, magSize, PERK_ORDER, REVIVE_TIME, weaponName }
 import { heldWeapon, type PlayerView } from '../view/WorldView';
 import { interactionPrompt } from './prompts';
 import { DISPLAY_FONT, shadowText } from './text';
+import { controlText } from './keys';
 
 export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   const { world, level } = game;
@@ -85,7 +86,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
     if (reviving && reviving.reviveProgress > 0) drawProgressBar(ctx, 'REVIVING', reviving.reviveProgress / REVIVE_TIME);
     else if (w.reloadProgress > 0) drawProgressBar(ctx, 'RELOADING', w.reloadProgress);
     else if (w.mag === 0 && w.reserve === 0) warn = 'NO AMMO - KNIFE';
-    else if (w.mag <= Math.ceil(magSize(w.id, w.tier) * 0.25)) warn = 'Press R to reload';
+    else if (w.mag <= Math.ceil(magSize(w.id, w.tier) * 0.25)) warn = controlText.reload;
   }
   if (warn) shadowText(ctx, warn, VIEW_W / 2, VIEW_H / 2 + 60, 'bold 16px monospace', warn.startsWith('NO AMMO') ? '#d03030' : '#ffffff', 'center');
 

@@ -1,5 +1,6 @@
 import { VIEW_H, VIEW_W, type Game } from '../core/Game';
 import { MAX_SCORES } from '../systems/HighScore';
+import { controlText } from './keys';
 import { DISPLAY_FONT, shadowText } from './text';
 
 const COLS = { name: 300, kills: 560, points: 660 };
@@ -38,8 +39,8 @@ export function drawGameOver(ctx: CanvasRenderingContext2D, game: Game): void {
     shadowText(ctx, `Record: ${best.name}, ${best.round} rounds, ${best.kills} kills`, cx, y, '15px monospace', '#a0a0a0', 'center', 'middle');
   }
   if (game.gameOverTimer > 1.5) {
-    const again = solo ? 'Click or press Enter to play again' : 'Click or press Enter to return to the lobby';
+    const again = `${controlText.confirm} to ${solo ? 'play again' : 'return to the lobby'}`;
     if (Math.floor(game.time * 2) % 2 === 0) shadowText(ctx, again, cx, 482, 'bold 18px monospace', '#ffffff', 'center', 'middle');
-    shadowText(ctx, 'Esc for main menu', cx, 514, '14px monospace', '#9a9a9a', 'center', 'middle');
+    shadowText(ctx, controlText.toMenu, cx, 514, '14px monospace', '#9a9a9a', 'center', 'middle');
   }
 }

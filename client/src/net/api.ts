@@ -1,5 +1,6 @@
 import { loadStored } from '../core/storage';
 import type { MapDoc } from '../game/MapData';
+import { apiUrl } from './server';
 
 /** REST client for the Spring Boot server. Every call can fail (server down, offline); callers fall back. */
 
@@ -63,7 +64,7 @@ export class ApiError extends Error {
 async function request<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${import.meta.env.BASE_URL}api${path}`, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
