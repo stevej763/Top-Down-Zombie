@@ -102,6 +102,8 @@ export class Game {
   time = 0;
   /** Off for touch, which has no pointer to aim with. */
   showCrosshair = true;
+  /** Sees every sim event as it's handled (the mobile app buzzes on some). */
+  eventHook?: (e: NetEvent) => void;
   gameOverTimer = 0;
   readonly scores: Leaderboard;
   /** Big centre-screen callout (power-ups, Second Wind, going down). */
@@ -566,6 +568,7 @@ export class Game {
 
   /** Purchases, points and screen shake are only shown to whoever they belong to. */
   private onEvent(e: NetEvent): void {
+    this.eventHook?.(e);
     const mine = 'player' in e && e.player === this.you;
     const pts = (points: number, x: number, y: number) => {
       if (mine && points > 0) this.particles.text(`+${points}`, x, y);
