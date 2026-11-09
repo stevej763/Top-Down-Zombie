@@ -4,8 +4,8 @@ import type { Link } from '../net/Connection';
 import { NetGame } from '../net/NetGame';
 import type { GameResult, LobbyPlayer, NetEvent, ServerMessage } from '../net/protocol';
 import {
-  drawCrosshair, drawInteractable, drawInteractableOverlay, drawLamps, drawPlayer, drawPlayerOverlay, drawPowerUps,
-  drawWindow, drawZombie, renderMap,
+  doorSide, doorSwingAt, drawCrosshair, drawInteractable, drawInteractableOverlay, drawLamps, drawPlayer,
+  drawPlayerOverlay, drawPowerUps, drawWindow, drawZombie, renderMap, type DoorSwing,
 } from '../render/draw';
 import { Lighting } from '../render/lighting';
 import {
@@ -96,6 +96,8 @@ export class Game {
   camera!: Camera;
   private playerFx = new Map<number, PlayerFx>();
   private zombieFx = new Map<number, ZombieFx>();
+  /** Per door fixture index: when it was seen opening and which way it swings. */
+  private doorFx = new Map<number, { at: number; side: 1 | -1 }>();
 
   time = 0;
   gameOverTimer = 0;
@@ -199,6 +201,7 @@ export class Game {
     this.camera.snap(this.me.x, this.me.y);
     this.playerFx.clear();
     this.zombieFx.clear();
+    this.doorFx.clear();
     this.callout.timer = 0;
     this.banner.timer = 0;
     this.feed = [];
@@ -435,6 +438,7 @@ export class Game {
     // While the socket is down the server isn't hearing us, so don't predict moves it won't make.
     if (this.link.status === 'open') this.link.send({ type: 'input', inputs: [net.tick(input, dt)] });
     this.world = net.view(this.time) ?? this.world;
+    this.updateDoors();
     this.updateEffects(dt);
     this.updateGroans(dt);
   }
@@ -480,6 +484,23 @@ export class Game {
     this.feed = this.feed.filter((l) => l.timer > 0);
     this.nowPlaying.timer = Math.max(0, this.nowPlaying.timer - dt);
     this.screenFlash = Math.max(0, this.screenFlash - dt * 1.5);
+  }
+
+  /** Doors swing open when a snapshot first shows them open, pushed away from the nearest player (most likely the buyer). */
+  private updateDoors(): void {
+    this.level.fixtures.forEach((f, i) => {
+      if (f.kind !== 'door' || !this.world.interactables[i]?.open || this.doorFx.has(i)) return;
+      let opener: PlayerView | undefined;
+      for (const p of this.world.players) {
+        if (p.state === 'alive' && (!opener || dist(p.x, p.y, f.x, f.y) < dist(opener.x, opener.y, f.x, f.y))) opener = p;
+      }
+      this.doorFx.set(i, { at: this.time, side: doorSide(this.level.data.map, f.def.tiles, opener) });
+    });
+  }
+
+  private doorSwing(i: number): DoorSwing | undefined {
+    const fx = this.doorFx.get(i);
+    return fx && { open: doorSwingAt(this.time - fx.at), side: fx.side };
   }
 
   private fxOf(id: number): ZombieFx {
@@ -751,7 +772,7 @@ export class Game {
     this.particles.drawDecals(ctx);
     const light = this.roomLight();
     drawLamps(ctx, level.lights, 0);
-    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time, world.power));
+    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time, world.power, this.doorSwing(i)));
     level.windows.forEach((w, i) => drawWindow(ctx, w, world.windows[i]));
     for (const z of world.zombies) drawZombie(ctx, z, this.fxOf(z.id), world.round.n);
     // The local player on top of teammates.

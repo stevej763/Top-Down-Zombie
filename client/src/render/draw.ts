@@ -287,21 +287,109 @@ export function drawLamps(ctx: CanvasRenderingContext2D, lights: LightArea[], li
   }
 }
 
-export function drawDoor(ctx: CanvasRenderingContext2D, tiles: [number, number][]): void {
-  for (const [tx, ty] of tiles) {
-    const x = tx * TILE;
-    const y = ty * TILE;
-    ctx.fillStyle = '#2b1d10';
-    ctx.fillRect(x, y, TILE, TILE);
-    ctx.fillStyle = '#5c4026';
-    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-    ctx.strokeStyle = '#3a2814';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x + 3, y + 3);
-    ctx.lineTo(x + TILE - 3, y + TILE - 3);
-    ctx.stroke();
+/** How far a door is through its swing (0 shut, 1 open) and which way it swings: +1 towards +y (or +x for a door in a vertical wall). */
+export interface DoorSwing {
+  open: number;
+  side: 1 | -1;
+}
+
+const DOOR_SWING_TIME = 0.5;
+const DOOR_THICKNESS = 10;
+
+/** Swing progress `age` seconds after opening: a quick shove that overshoots a little and settles against the wall. */
+export function doorSwingAt(age: number): number {
+  const t = Math.min(1, Math.max(0, age / DOOR_SWING_TIME));
+  const c = 1.6;
+  return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2;
+}
+
+function doorSpan(tiles: [number, number][]) {
+  const xs = tiles.map(([x]) => x);
+  const ys = tiles.map(([, y]) => y);
+  const x0 = Math.min(...xs) * TILE;
+  const y0 = Math.min(...ys) * TILE;
+  const x1 = (Math.max(...xs) + 1) * TILE;
+  const y1 = (Math.max(...ys) + 1) * TILE;
+  return { x0, y0, x1, y1, horizontal: x1 - x0 >= y1 - y0 };
+}
+
+/**
+ * Which way a door should swing: away from whoever opened it at (fromX, fromY), unless the leaves would
+ * sweep into a wall or furniture on that side. Without an opener, the side with room for them.
+ */
+export function doorSide(map: MapData['map'], tiles: [number, number][], from?: { x: number; y: number }): 1 | -1 {
+  const { x0, y0, x1, y1, horizontal } = doorSpan(tiles);
+  const reach = Math.ceil(Math.max(1, tiles.length / 2));
+  const clear = (side: 1 | -1) => {
+    for (const [tx, ty] of [tiles[0], tiles[tiles.length - 1]]) {
+      for (let i = 1; i <= reach; i++) {
+        const t = horizontal ? map.get(tx, ty + side * i) : map.get(tx + side * i, ty);
+        if (t !== Tile.Floor && t !== Tile.Door) return false;
+      }
+    }
+    return true;
+  };
+  const away: 1 | -1 = from ? ((horizontal ? from.y < (y0 + y1) / 2 : from.x < (x0 + x1) / 2) ? 1 : -1) : 1;
+  return clear(away) || !clear(-away as 1 | -1) ? away : (-away as 1 | -1);
+}
+
+function drawDoorLeaf(ctx: CanvasRenderingContext2D, hx: number, hy: number, angle: number, len: number): void {
+  const t = DOOR_THICKNESS;
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(angle);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(1, -t / 2 + 3, len, t);
+  ctx.fillStyle = '#3a2814';
+  ctx.fillRect(0, -t / 2, len, t);
+  ctx.fillStyle = '#7a5532';
+  ctx.fillRect(1, -t / 2 + 1, len - 2, t - 2);
+  // Two recessed panels and a highlight along the top edge.
+  ctx.fillStyle = '#5c4026';
+  const pw = (len - 9) / 2;
+  ctx.fillRect(3, -2, pw, 4);
+  ctx.fillRect(6 + pw, -2, pw, 4);
+  ctx.fillStyle = 'rgba(255, 220, 170, 0.18)';
+  ctx.fillRect(1, -t / 2 + 1, len - 2, 1);
+  // Hinge barrel and brass handles on both faces near the free edge.
+  ctx.fillStyle = '#2a2a2e';
+  ctx.beginPath();
+  ctx.arc(0, 0, 2.5, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#d9b44a';
+  ctx.fillRect(len - 7, -t / 2 - 2, 3, 2);
+  ctx.fillRect(len - 7, t / 2, 3, 2);
+  ctx.restore();
+}
+
+/** A doorway: a threshold strip, jambs, and one leaf (two for wider doors) swung `swing.open` of the way to the wall. */
+export function drawDoor(ctx: CanvasRenderingContext2D, tiles: [number, number][], swing: DoorSwing = { open: 0, side: 1 }): void {
+  if (tiles.length === 0) return;
+  const { x0, y0, x1, y1, horizontal } = doorSpan(tiles);
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const len = horizontal ? x1 - x0 : y1 - y0;
+
+  ctx.fillStyle = '#2b1d10';
+  if (horizontal) ctx.fillRect(x0, cy - 6, len, 12);
+  else ctx.fillRect(cx - 6, y0, 12, len);
+  ctx.fillStyle = '#6b6b78';
+  if (horizontal) {
+    ctx.fillRect(x0 - 2, cy - 9, 4, 18);
+    ctx.fillRect(x1 - 2, cy - 9, 4, 18);
+  } else {
+    ctx.fillRect(cx - 9, y0 - 2, 18, 4);
+    ctx.fillRect(cx - 9, y1 - 2, 18, 4);
   }
+
+  const sweep = Math.PI / 2 * swing.open * swing.side;
+  // [hinge x, hinge y, closed angle, sweep sign] per leaf.
+  const leaves: [number, number, number, number][] = horizontal
+    ? [[x0, cy, 0, 1], [x1, cy, Math.PI, -1]]
+    : [[cx, y0, Math.PI / 2, -1], [cx, y1, -Math.PI / 2, 1]];
+  if (tiles.length === 1) leaves.pop();
+  const leafLen = len / leaves.length - (leaves.length > 1 ? 0.5 : 0);
+  for (const [hx, hy, a, sign] of leaves) drawDoorLeaf(ctx, hx, hy, a + sign * sweep, leafLen);
 }
 
 export function zombieColors(z: ZombieView, round: number): { body: string; skin: string } {
@@ -527,8 +615,10 @@ export function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: numbe
   ctx.fillRect(x - 1, y - 1, 2, 2);
 }
 
-/** `powered` is `WorldView.power`. */
-export function drawInteractable(ctx: CanvasRenderingContext2D, f: Fixture, s: InteractableView, time: number, powered: boolean): void {
+/** `powered` is `WorldView.power`; `door` is a door's swing (shut when left out). */
+export function drawInteractable(
+  ctx: CanvasRenderingContext2D, f: Fixture, s: InteractableView, time: number, powered: boolean, door?: DoorSwing,
+): void {
   switch (f.kind) {
     case 'wallBuy':
       drawWallBuy(ctx, f.spot.tx, f.spot.ty, WEAPONS[f.weapon]);
@@ -546,7 +636,7 @@ export function drawInteractable(ctx: CanvasRenderingContext2D, f: Fixture, s: I
       drawMysteryBox(ctx, f.tx, f.ty, (s.state ?? 'closed') !== 'closed', powered);
       break;
     case 'door':
-      if (!s.open) drawDoor(ctx, f.def.tiles);
+      drawDoor(ctx, f.def.tiles, door);
       break;
     case 'power':
       drawPowerSwitch(ctx, f.spot, powered, time);
