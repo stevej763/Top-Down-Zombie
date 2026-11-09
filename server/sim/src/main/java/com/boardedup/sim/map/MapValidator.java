@@ -21,6 +21,8 @@ import java.util.regex.Pattern;
  * <p>Rooms aren't painted onto tiles. They're found by flood-filling floor, with doors and walls as
  * boundaries; each region is then named by the windows, doors and start point that touch it, and
  * those names have to agree.
+ *
+ * <p>The admin map editor has a TypeScript copy for live feedback (admin/src/validate.ts); keep the two in step.
  */
 public final class MapValidator {
     public static final Pattern ID_PATTERN = Pattern.compile("^[a-z0-9-]{1,40}$");
