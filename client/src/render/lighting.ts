@@ -10,6 +10,11 @@ const FLASHLIGHT_HALF_ANGLE = 0.5;
 const FLASHLIGHT_RAYS = 120;
 /** How far the beam reaches into the wall it stops at, so the wall's face is lit. */
 const FLASHLIGHT_WALL_BLEED = 10;
+/** Share of the torch that shows through walls, so you can just make out rooms you haven't opened. */
+const FLASHLIGHT_LEAK = 0.1;
+/** The small glow around every player, so the floor at their feet is never pitch black. */
+const PLAYER_GLOW_RADIUS = 55;
+const PLAYER_GLOW = 0.75;
 /** "r, g, b" of the room lights. */
 const ROOM_LIGHT = '255, 225, 170';
 /** How much of the darkness the room lights lift: evenly across a room, and extra under each lamp. */
@@ -21,7 +26,7 @@ const ROOM_LIGHT_STRENGTH = 0.92;
 /** Warm tint the lights add on top. */
 const ROOM_TINT = 0.07;
 
-/** Darkness overlay with lights punched out of it (each player's torch, windows, room lights). */
+/** Darkness overlay with lights punched out of it (each player's glow and torch, windows, room lights). */
 export class Lighting {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -55,9 +60,10 @@ export class Lighting {
       c.globalAlpha = 1;
     }
 
-    // The torch is the only light a player gives off: it fades out as the room lights come on,
-    // and a downed player's torch has dropped.
+    // Each player gives off a small glow and, while the room lights are off, a torch;
+    // a downed player's torch has dropped, so only their glow is left.
     const lit = world.players.filter((p) => p.state !== 'dead');
+    for (const p of lit) this.glow(p.x - camX, p.y - camY, PLAYER_GLOW_RADIUS, PLAYER_GLOW);
     const torch = 1 - light;
     if (torch > 0) {
       for (const p of lit) {
@@ -69,6 +75,14 @@ export class Lighting {
         g.addColorStop(0.7, `rgba(0, 0, 0, ${0.6 * torch})`);
         g.addColorStop(1, 'rgba(0, 0, 0, 0)');
         c.fillStyle = g;
+        // A faint copy of the whole cone leaks through walls; the traced beam goes on top.
+        c.globalAlpha = FLASHLIGHT_LEAK;
+        c.beginPath();
+        c.moveTo(px, py);
+        c.arc(px, py, FLASHLIGHT_RANGE, p.aim - FLASHLIGHT_HALF_ANGLE, p.aim + FLASHLIGHT_HALF_ANGLE);
+        c.closePath();
+        c.fill();
+        c.globalAlpha = 1;
         this.torchShape(level.data.map, p.x, p.y, p.aim, camX, camY);
         c.fill();
       }
