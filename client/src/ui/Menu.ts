@@ -2,6 +2,7 @@ import { sound, type VolumeChannel } from '../audio/Sound';
 import { VIEW_H, VIEW_W, type Game } from '../core/Game';
 import { loadIdentity, NAME_MAX, setName, validName } from '../net/api';
 import { MAX_SCORES } from '../systems/HighScore';
+import { controlText } from './keys';
 import { DISPLAY_FONT, shadowText } from './text';
 
 /** Title menu and pause menu: pages of buttons/sliders driven by keyboard or mouse. */
@@ -39,18 +40,6 @@ const BUTTON_MAX_W = 300;
 const TRACK_LEFT = 200;
 const TRACK_RIGHT = 90;
 const SLIDER_STEP = 0.1;
-
-const CONTROLS = [
-  ['WASD / Arrows', 'Move'],
-  ['Mouse', 'Aim'],
-  ['Space / Left Click', 'Shoot'],
-  ['R', 'Reload'],
-  ['E', 'Buy / use  (hold to rebuild)'],
-  ['F / V', 'Knife  (auto when out of ammo)'],
-  ['1 / 2 / Q / Wheel', 'Switch weapon'],
-  ['M', 'Mute'],
-  ['Esc / P', 'Pause'],
-];
 
 const TITLES: Record<Page, string> = {
   main: 'PAUSED', scores: 'HIGH SCORES', audio: 'AUDIO', controls: 'CONTROLS', name: 'YOUR NAME', maps: 'CHOOSE MAP',
@@ -380,7 +369,9 @@ export class Menu {
 
     items.forEach((it, i) => drawItem(ctx, it, rects[i], i === this.index));
 
-    const hint = this.page === 'audio'
+    const hint = !controlText.menuHints
+      ? this.page === 'lobby' ? 'Share the code with your friends' : ''
+      : this.page === 'audio'
       ? '↑↓ select   ←→ adjust   Enter toggle   Esc back'
       : this.page === 'name'
         ? 'Type your name   Enter confirm   Esc back'
@@ -573,7 +564,7 @@ function drawLobby(ctx: CanvasRenderingContext2D, game: Game): void {
 function drawControls(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.fillRect(170, 145, 620, 345);
-  CONTROLS.forEach(([key, action], i) => {
+  controlText.controls.forEach(([key, action], i) => {
     const y = 180 + i * 35;
     shadowText(ctx, key, VIEW_W / 2 - 20, y, 'bold 16px monospace', '#f2d15c', 'right', 'middle');
     shadowText(ctx, action, VIEW_W / 2 + 20, y, '16px monospace', '#e0e0e0', 'left', 'middle');

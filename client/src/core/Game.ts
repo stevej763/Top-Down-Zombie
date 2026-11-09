@@ -100,6 +100,10 @@ export class Game {
   private doorFx = new Map<number, { at: number; side: 1 | -1 }>();
 
   time = 0;
+  /** Off for touch, which has no pointer to aim with. */
+  showCrosshair = true;
+  /** Sees every sim event as it's handled (the mobile app buzzes on some). */
+  eventHook?: (e: NetEvent) => void;
   gameOverTimer = 0;
   readonly scores: Leaderboard;
   /** Big centre-screen callout (power-ups, Second Wind, going down). */
@@ -119,12 +123,12 @@ export class Game {
   private last = 0;
   private acc = 0;
 
-  /** `maps` is the server's map list; `mapDoc` is drawn behind the title menu. */
-  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], private mapDoc: MapDoc, readonly link: Link) {
+  /** `maps` is the server's map list; `mapDoc` is drawn behind the title menu. `input` replaces keyboard and mouse (touch). */
+  constructor(private canvas: HTMLCanvasElement, readonly maps: MapSummary[], private mapDoc: MapDoc, readonly link: Link, input?: Input) {
     this.mapId = mapDoc.id;
     this.scores = new Leaderboard(mapDoc.id);
     this.ctx = canvas.getContext('2d')!;
-    this.input = new Input(canvas, VIEW_W, VIEW_H);
+    this.input = input ?? new Input(canvas, VIEW_W, VIEW_H);
     this.toMenu();
     window.addEventListener('blur', () => {
       if (this.state === 'playing') this.pause();
@@ -564,6 +568,7 @@ export class Game {
 
   /** Purchases, points and screen shake are only shown to whoever they belong to. */
   private onEvent(e: NetEvent): void {
+    this.eventHook?.(e);
     const mine = 'player' in e && e.player === this.you;
     const pts = (points: number, x: number, y: number) => {
       if (mine && points > 0) this.particles.text(`+${points}`, x, y);
@@ -808,7 +813,7 @@ export class Game {
     if (this.state !== 'menu') drawHUD(ctx, this);
     if (this.state === 'menu' || this.state === 'paused') this.menu.draw(ctx, this);
     else if (this.state === 'gameover') drawGameOver(ctx, this);
-    else drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, WEAPONS[heldWeapon(this.me).id].pellets > 1 ? 10 : 5);
+    else if (this.showCrosshair) drawCrosshair(ctx, this.input.mouse.x, this.input.mouse.y, WEAPONS[heldWeapon(this.me).id].pellets > 1 ? 10 : 5);
 
     const cursor = this.state === 'playing' ? 'none' : 'default';
     if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;

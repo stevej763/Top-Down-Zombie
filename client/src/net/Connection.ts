@@ -1,4 +1,5 @@
 import { ensureRegistered, loadIdentity } from './api';
+import { wsUrl } from './server';
 import type { ClientMessage, ServerMessage } from './protocol';
 
 export type LinkStatus = 'idle' | 'connecting' | 'open' | 'reconnecting';
@@ -89,7 +90,7 @@ export class Connection implements Link {
       this.retry();
       return;
     }
-    const ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}${import.meta.env.BASE_URL}ws?token=${encodeURIComponent(id.token)}`);
+    const ws = new WebSocket(`${wsUrl()}?token=${encodeURIComponent(id.token)}`);
     this.ws = ws;
     let opened = false;
     ws.onopen = () => {
