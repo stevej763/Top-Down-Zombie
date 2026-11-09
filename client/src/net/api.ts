@@ -1,8 +1,9 @@
+import { loadStored } from '../core/storage';
 import type { MapDoc } from '../game/MapData';
 
 /** REST client for the Spring Boot server. Every call can fail (server down, offline); callers fall back. */
 
-const IDENTITY_KEY = 'boarded-up-identity';
+const IDENTITY_KEY = 'top-down-survival-identity';
 const TIMEOUT_MS = 5000;
 /** Mirrors the server's PlayerController.NAME_PATTERN. */
 const NAME_RE = /^[\p{L}\p{N}_.'-]([\p{L}\p{N} _.'-]{0,18}[\p{L}\p{N}_.'-])?$/u;
@@ -37,7 +38,7 @@ export function validName(name: string): boolean {
 
 export function loadIdentity(): Identity | null {
   try {
-    const raw = localStorage.getItem(IDENTITY_KEY);
+    const raw = loadStored(IDENTITY_KEY);
     return raw ? (JSON.parse(raw) as Identity) : null;
   } catch {
     return null;
