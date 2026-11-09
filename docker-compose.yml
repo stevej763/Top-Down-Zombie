@@ -41,5 +41,17 @@ services:
       - server
     restart: unless-stopped
 
+  # The admin portal (map editor). Saving needs ADMIN_TOKEN set for the server.
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    image: boarded-up-admin
+    ports:
+      - "8552:80"
+    depends_on:
+      - server
+    restart: unless-stopped
+
 volumes:
   db-data:

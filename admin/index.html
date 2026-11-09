@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boarded Up · Admin</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header id="top">
+      <div class="brand">BOARDED UP <span>admin · maps</span></div>
+      <div class="group">
+        <button data-act="new" title="New map">New</button>
+        <button data-act="open" title="Open a map from the server">Open</button>
+        <button data-act="import" title="Open a .json file">Import</button>
+        <button data-act="download" title="Download the map as JSON">Download</button>
+      </div>
+      <div class="group">
+        <button data-act="undo" title="Undo (Ctrl+Z)">Undo</button>
+        <button data-act="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      </div>
+      <div class="group">
+        <button data-act="grid" class="toggle" title="Tile grid">Grid</button>
+        <button data-act="rooms" class="toggle" title="Room areas, names and window directions">Rooms</button>
+        <button data-act="clean" class="toggle" title="Hide editor overlays (C)">Clean</button>
+        <button data-act="fit" title="Fit the map to the window (F)">Fit</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="group">
+        <button data-act="repo" class="dev-only" title="Write maps/&lt;id&gt;.json in the repo (dev server only)">Write to repo</button>
+        <button data-act="save" class="primary" title="PUT /api/maps/&lt;id&gt; (Ctrl+S)">Save to server</button>
+      </div>
+    </header>
+    <main>
+      <nav id="tools"></nav>
+      <aside id="options"></aside>
+      <div id="stage">
+        <canvas id="view"></canvas>
+        <div id="status"></div>
+      </div>
+      <aside id="side"></aside>
+    </main>
+    <dialog id="modal"></dialog>
+    <div id="toast"></div>
+    <input type="file" id="file" accept=".json,application/json" hidden />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

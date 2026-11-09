@@ -1,0 +1,6 @@
+*
+!admin
+!client/src
+!shared
+admin/node_modules
+admin/dist
