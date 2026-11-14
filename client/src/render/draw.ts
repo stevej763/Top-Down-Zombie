@@ -49,7 +49,9 @@ export function renderMap(data: MapData): HTMLCanvasElement {
 
   drawFloorDecor(ctx, map, data.decor);
   // Plain crates are drawn where no furniture covers the tile; furniture draws its own shadow.
+  // Perk machines stand on crate tiles too and are drawn live, with their own shadow.
   const furnished = furnitureTiles(map, data.decor);
+  for (const p of data.perks) furnished.add(p.ty * map.w + p.tx);
   const crate = (tx: number, ty: number) => map.get(tx, ty) === Tile.Crate && !furnished.has(ty * map.w + tx);
 
   // Shadows cast by walls/crates onto the floor below them.
@@ -151,22 +153,49 @@ export function drawWallBuy(ctx: CanvasRenderingContext2D, tx: number, ty: numbe
   ctx.restore();
 }
 
-/** A vending-machine style perk dispenser filling its wall tile; dark and still without power. */
-export function drawPerkMachine(ctx: CanvasRenderingContext2D, tx: number, ty: number, perk: PerkDef, time: number, powered: boolean): void {
-  const x = tx * TILE;
-  const y = ty * TILE;
-  ctx.fillStyle = '#1a1a1f';
-  ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
+/**
+ * A freestanding perk machine on its own tile, its back to the wall and its lit dispenser facing
+ * the floor it's used from (`spot.nx`, `spot.ny`); dark and still without power.
+ */
+export function drawPerkMachine(ctx: CanvasRenderingContext2D, spot: WallSpot, perk: PerkDef, time: number, powered: boolean): void {
+  const cx = spot.tx * TILE + TILE / 2;
+  const cy = spot.ty * TILE + TILE / 2;
   const look = PERK_VISUALS[perk.id];
+  const pulse = powered ? 0.75 + Math.sin(time * 3 + spot.tx) * 0.15 : 0.22;
+  ctx.save();
+  ctx.translate(cx, cy);
+  // Drawn with the front pointing down (+y) and the back against the wall at -y.
+  ctx.rotate(Math.atan2(spot.ny, spot.nx) - Math.PI / 2);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.fillRect(-13, -14, 28, 31);
+  ctx.fillStyle = '#121216';
+  ctx.fillRect(-14, -16, 28, 30);
+  ctx.fillStyle = '#24242c';
+  ctx.fillRect(-13, -15, 26, 28);
+  // Coloured roof panel, then the dispenser window along the front edge.
   ctx.fillStyle = look.color;
-  ctx.globalAlpha = powered ? 0.75 + Math.sin(time * 3 + tx) * 0.15 : 0.22;
-  ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
+  ctx.globalAlpha = pulse;
+  ctx.fillRect(-10, -12, 20, 16);
   ctx.globalAlpha = 1;
+  ctx.fillStyle = '#0c0c10';
+  ctx.fillRect(-11, 6, 22, 6);
+  ctx.fillStyle = powered ? look.color : '#33333a';
+  ctx.globalAlpha = powered ? 0.6 + pulse * 0.4 : 1;
+  ctx.fillRect(-10, 7, 20, 4);
+  ctx.globalAlpha = 1;
+  if (powered) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.fillRect(-10, 7, 20, 1);
+  }
+  ctx.fillStyle = powered ? '#d8d8de' : '#4a4a52';
+  ctx.fillRect(9, -1, 2, 4);
+  ctx.restore();
+  // The letter stays upright whichever way the machine faces.
   ctx.fillStyle = powered ? '#fff' : '#55555c';
-  ctx.font = 'bold 16px Impact, "Arial Black", sans-serif';
+  ctx.font = 'bold 14px Impact, "Arial Black", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(look.letter, x + TILE / 2, y + TILE / 2 + 1);
+  ctx.fillText(look.letter, cx - spot.nx * 4, cy - spot.ny * 4 + 1);
 }
 
 export function drawArmourBench(ctx: CanvasRenderingContext2D, tx: number, ty: number): void {
@@ -636,7 +665,7 @@ export function drawInteractable(
       drawWallBuy(ctx, f.spot.tx, f.spot.ty, WEAPONS[f.weapon]);
       break;
     case 'perk':
-      drawPerkMachine(ctx, f.spot.tx, f.spot.ty, PERKS[f.perk], time, powered);
+      drawPerkMachine(ctx, f.spot, PERKS[f.perk], time, powered);
       break;
     case 'armour':
       drawArmourBench(ctx, f.spot.tx, f.spot.ty);

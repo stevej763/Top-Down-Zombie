@@ -226,10 +226,7 @@ public final class MapValidator {
                 if (!Defs.standard().weapons.containsKey(s.weapon())) err("wall buy at " + s.tx() + "," + s.ty() + ": unknown weapon \"" + s.weapon() + "\"");
                 spots.put("wall buy at " + s.tx() + "," + s.ty(), new MapDoc.WallSpot(s.tx(), s.ty(), s.nx(), s.ny()));
             });
-            m.perks().forEach(s -> {
-                if (!Defs.standard().perks.containsKey(s.perk())) err("perk at " + s.tx() + "," + s.ty() + ": unknown perk \"" + s.perk() + "\"");
-                spots.put("perk at " + s.tx() + "," + s.ty(), new MapDoc.WallSpot(s.tx(), s.ty(), s.nx(), s.ny()));
-            });
+            m.perks().forEach(this::checkPerk);
             spots.put("armour", m.armour());
             spots.put("upgrade", m.upgrade());
             if (m.power() != null) spots.put("power switch", m.power());
@@ -238,6 +235,21 @@ public final class MapValidator {
                 if (Math.abs(s.nx()) + Math.abs(s.ny()) != 1) err(what + ": (nx, ny) must be one step along an axis");
                 else if (regionAt(s.tx() + s.nx(), s.ty() + s.ny()) < 0) err(what + ": (nx, ny) must face a floor tile");
             });
+        }
+
+        /** Perk machines are freestanding: a crate tile of their own with its back to a wall. */
+        void checkPerk(MapDoc.PerkSpot s) {
+            String what = "perk at " + s.tx() + "," + s.ty();
+            if (!Defs.standard().perks.containsKey(s.perk())) err(what + ": unknown perk \"" + s.perk() + "\"");
+            if (at(s.tx(), s.ty()) != 'C') err(what + ": must be on a crate tile ('C')");
+            if (Math.abs(s.nx()) + Math.abs(s.ny()) != 1) {
+                err(what + ": (nx, ny) must be one step along an axis");
+                return;
+            }
+            if (at(s.tx() - s.nx(), s.ty() - s.ny()) != '#') err(what + ": must have its back (opposite (nx, ny)) to a wall tile");
+            if (regionAt(s.tx() + s.nx(), s.ty() + s.ny()) < 0) err(what + ": (nx, ny) must face a floor tile");
+            TilePos b = m.box();
+            if (s.ty() == b.ty() && (s.tx() == b.tx() || s.tx() == b.tx() + 1)) err(what + ": can't stand on the box");
         }
 
         void checkBox() {

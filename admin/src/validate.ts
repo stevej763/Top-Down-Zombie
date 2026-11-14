@@ -150,9 +150,16 @@ export function validate(doc: Loose<MapDoc>): Problem[] {
     if (!(s.weapon in WEAPONS)) err(`wall buy at ${s.tx},${s.ty}: unknown weapon "${s.weapon}"`, s.tx, s.ty);
     spots.push([`wall buy at ${s.tx},${s.ty}`, s]);
   }
+  // Perk machines are freestanding: a crate tile of their own with its back to a wall.
   for (const s of m.perks ?? []) {
-    if (!(s.perk in PERKS)) err(`perk at ${s.tx},${s.ty}: unknown perk "${s.perk}"`, s.tx, s.ty);
-    spots.push([`perk at ${s.tx},${s.ty}`, s]);
+    const what = `perk at ${s.tx},${s.ty}`;
+    if (!(s.perk in PERKS)) err(`${what}: unknown perk "${s.perk}"`, s.tx, s.ty);
+    if (atc(s.tx, s.ty) !== 'C') err(`${what}: must be on a crate tile ('C')`, s.tx, s.ty);
+    if (Math.abs(s.nx) + Math.abs(s.ny) !== 1) { err(`${what}: (nx, ny) must be one step along an axis`, s.tx, s.ty); continue; }
+    if (atc(s.tx - s.nx, s.ty - s.ny) !== '#') err(`${what}: must have its back (opposite (nx, ny)) to a wall tile`, s.tx, s.ty);
+    if (regionAt(s.tx + s.nx, s.ty + s.ny) < 0) err(`${what}: (nx, ny) must face a floor tile`, s.tx, s.ty);
+    const bx = m.box;
+    if (bx && s.ty === bx.ty && (s.tx === bx.tx || s.tx === bx.tx + 1)) err(`${what}: can't stand on the box`, s.tx, s.ty);
   }
   spots.push(['armour', m.armour!], ['upgrade', m.upgrade!]);
   if (m.power) spots.push(['power switch', m.power]);

@@ -123,6 +123,20 @@ class MapValidatorTest {
     }
 
     @Test
+    void perkMachinesStandOnACrateWithTheirBackToAWall() throws IOException {
+        // The house's Second Wind machine is at 21,7, its back to the wall at 22,7.
+        assertThat(houseWith(m -> setTile(m, 21, 7, '_')))
+                .anyMatch(e -> e.startsWith("perk at 21,7") && e.contains("crate tile"));
+        assertThat(houseWith(m -> list(m, "perks").getFirst().put("nx", 1)))
+                .anyMatch(e -> e.startsWith("perk at 21,7") && e.contains("back"))
+                .anyMatch(e -> e.startsWith("perk at 21,7") && e.contains("face a floor"));
+        assertThat(houseWith(m -> {
+            setTile(m, 10, 7, 'C');
+            list(m, "perks").getFirst().put("tx", 10);
+        })).anyMatch(e -> e.startsWith("perk at 10,7") && e.contains("back"));
+    }
+
+    @Test
     void boxMustSitOnCrates() throws IOException {
         assertThat(houseWith(m -> ((Map<String, Object>) m.get("box")).put("tx", 10)))
                 .anyMatch(e -> e.startsWith("box"));
