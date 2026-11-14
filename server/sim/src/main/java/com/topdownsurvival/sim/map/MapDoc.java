@@ -50,6 +50,10 @@ public record MapDoc(
 
     public record WallBuyDef(int tx, int ty, int nx, int ny, String weapon) {}
 
+    /**
+     * A freestanding perk machine on its own {@code C} tile, its back to a wall; (nx, ny) points
+     * away from that wall toward the floor it's used from.
+     */
     public record PerkSpot(int tx, int ty, int nx, int ny, String perk) {}
 
     /** A w×h tile rectangle. {@code face} (n/e/s/w, optional) is the side its front points to. */

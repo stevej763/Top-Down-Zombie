@@ -58,6 +58,7 @@ class MapValidatorTest {
 
     @Test
     void powerSwitchIsOptionalButMustBeOnAWall() throws IOException {
+        assertThat(houseWith(m -> m.remove("power"))).isEmpty();
         assertThat(houseWith(m -> m.put("power", Map.of("tx", 4, "ty", 6, "nx", 1, "ny", 0)))).isEmpty();
         assertThat(houseWith(m -> m.put("power", Map.of("tx", 9, "ty", 9, "nx", 0, "ny", 1))))
                 .anyMatch(e -> e.contains("power switch") && e.contains("wall tile"));
@@ -120,6 +121,20 @@ class MapValidatorTest {
         });
         assertThat(errors).anyMatch(e -> e.startsWith("armour") && e.contains("face a floor"));
         assertThat(errors).anyMatch(e -> e.startsWith("upgrade") && e.contains("wall tile"));
+    }
+
+    @Test
+    void perkMachinesStandOnACrateWithTheirBackToAWall() throws IOException {
+        // The house's Second Wind machine is at 21,7, its back to the wall at 22,7.
+        assertThat(houseWith(m -> setTile(m, 21, 7, '_')))
+                .anyMatch(e -> e.startsWith("perk at 21,7") && e.contains("crate tile"));
+        assertThat(houseWith(m -> list(m, "perks").getFirst().put("nx", 1)))
+                .anyMatch(e -> e.startsWith("perk at 21,7") && e.contains("back"))
+                .anyMatch(e -> e.startsWith("perk at 21,7") && e.contains("face a floor"));
+        assertThat(houseWith(m -> {
+            setTile(m, 10, 7, 'C');
+            list(m, "perks").getFirst().put("tx", 10);
+        })).anyMatch(e -> e.startsWith("perk at 10,7") && e.contains("back"));
     }
 
     @Test

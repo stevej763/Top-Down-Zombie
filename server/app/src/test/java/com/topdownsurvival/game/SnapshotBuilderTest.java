@@ -41,8 +41,8 @@ class SnapshotBuilderTest {
 
         assertThat(j.get("type").asString()).isEqualTo("snapshot");
         assertThat(j.get("acks").get("1").asInt()).isEqualTo(9);
-        // The house has no power switch, so it's powered from the start.
-        assertThat(j.get("power").asBoolean()).isTrue();
+        // The house starts dark until someone throws its power switch.
+        assertThat(j.get("power").asBoolean()).isFalse();
         assertThat(j.get("powerUps").has("double")).isTrue();
         JsonNode p = j.get("players").get(0);
         assertThat(p.get("state").asString()).isEqualTo("alive");

@@ -44,6 +44,7 @@ public abstract sealed class Interactable {
         return false;
     }
 
+    /** Used from the floor tile one step along (nx, ny) from its spot (a wall, or a perk machine's own crate tile). */
     public abstract static sealed class WallMounted extends Interactable {
         public final WallSpot spot;
 
@@ -78,6 +79,7 @@ public abstract sealed class Interactable {
         }
     }
 
+    /** A freestanding machine on its own crate tile, its back to a wall (see {@code MapDoc.PerkSpot}). */
     public static final class PerkMachine extends WallMounted {
         public final PerkDef perk;
 

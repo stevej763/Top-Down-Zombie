@@ -121,7 +121,7 @@ export class View {
       drawWindow(ctx, { def: w, center: { x: w.tx * TILE + TILE / 2, y: w.ty * TILE + TILE / 2 }, horizontal: w.dy !== 0 }, 6);
     }
     for (const s of d.wallBuys) if (s.weapon in WEAPONS) drawWallBuy(ctx, s.tx, s.ty, WEAPONS[s.weapon]);
-    for (const s of d.perks) if (s.perk in PERKS) drawPerkMachine(ctx, s.tx, s.ty, PERKS[s.perk], time, true);
+    for (const s of d.perks) if (s.perk in PERKS) drawPerkMachine(ctx, s, PERKS[s.perk], time, true);
     if (d.armour) drawArmourBench(ctx, d.armour.tx, d.armour.ty);
     if (d.upgrade) drawUpgradeBench(ctx, d.upgrade.tx, d.upgrade.ty, time, true);
     if (d.box) drawMysteryBox(ctx, d.box.tx, d.box.ty, false, true);

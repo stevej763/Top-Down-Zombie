@@ -22,7 +22,7 @@ const WALL_WEAPONS = (Object.keys(WEAPONS) as WeaponId[]).filter((w) => WEAPONS[
 const PLACES: { id: PlaceKind; name: string; hint: string }[] = [
   { id: 'start', name: 'Player start', hint: 'A floor tile; its room is where everyone starts' },
   { id: 'wallBuy', name: 'Wall buy', hint: 'On a wall tile, facing the floor you buy it from' },
-  { id: 'perk', name: 'Perk machine', hint: 'On a wall tile; needs power on maps with a switch' },
+  { id: 'perk', name: 'Perk machine', hint: 'On a floor tile against a wall (it becomes the machine\'s crate); needs power on maps with a switch' },
   { id: 'armour', name: 'Armour bench', hint: 'On a wall tile' },
   { id: 'upgrade', name: 'Upgrade bench', hint: 'On a wall tile; needs power on maps with a switch' },
   { id: 'box', name: 'Mystery box', hint: 'Two tiles wide, used from the floor below it' },
@@ -150,8 +150,8 @@ function mapSection(e: Editor): HTMLElement {
   );
 }
 
-function facingRow(e: Editor, s: WallSpot): HTMLElement {
-  const opts = e.wallFacings(s.tx, s.ty);
+function facingRow(e: Editor, s: WallSpot, perk = false): HTMLElement {
+  const opts = perk ? e.perkFacings(s.tx, s.ty) : e.wallFacings(s.tx, s.ty);
   const cur = `${s.nx},${s.ny}`;
   const all = opts.map(([x, y]) => `${x},${y}`);
   if (!all.includes(cur)) all.unshift(cur);
@@ -190,7 +190,7 @@ function selectionSection(e: Editor): HTMLElement {
       const p = d.perks[s.index];
       sec.append(h('b', {}, 'Perk machine'), pos(p),
         h('div', { class: 'row' }, h('label', {}, 'Perk'), perkSelect(p.perk, (v) => e.edit(() => { p.perk = v; }))),
-        facingRow(e, p), del);
+        facingRow(e, p, true), del);
       break;
     }
     case 'armour':

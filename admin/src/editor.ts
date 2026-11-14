@@ -5,7 +5,7 @@ import {
   at, DECOR_BY_KIND, footprint, inside, setCell, toDoc, type DecorKind, type Draft, type Face, type PlaceKind,
   type TileChar,
 } from './model';
-import { normalize, wallFacings, type Regions } from './rooms';
+import { normalize, perkFacings, wallFacings, type Regions } from './rooms';
 import { validate, type Problem } from './validate';
 
 export type Tool = 'select' | 'brush' | 'rect' | 'room' | 'fill' | 'place' | 'decor' | 'erase';
@@ -340,9 +340,9 @@ export class Editor {
     }
   }
 
-  /** Facing for a wall fixture placed at a cursor: the floor side nearest the pointer. */
+  /** Facing for a fixture placed at a cursor: the floor side nearest the pointer. */
   private facingFor(c: Cursor): [number, number] {
-    const options = wallFacings(this.draft, this.regions, c.tx, c.ty);
+    const options = (this.place === 'perk' ? perkFacings : wallFacings)(this.draft, this.regions, c.tx, c.ty);
     if (!options.length) return [0, 1];
     const px = c.fx - 0.5, py = c.fy - 0.5;
     return options.reduce((best, o) => (o[0] * px + o[1] * py > best[0] * px + best[1] * py ? o : best));
@@ -369,11 +369,16 @@ export class Editor {
         d.wallBuys.push({ ...spot, weapon: this.weapon });
         this.selection = { kind: 'wallBuy', index: d.wallBuys.length - 1 };
         break;
-      case 'perk':
-        clearSpot();
+      case 'perk': {
+        // A machine stands on a floor tile against a wall, which it makes solid; or replaces one already there.
+        const i = d.perks.findIndex((s) => s.tx === tx && s.ty === ty);
+        if (i >= 0) d.perks.splice(i, 1);
+        else if (at(d, tx, ty) !== '_' || !perkFacings(d, this.regions, tx, ty).length) break;
+        setCell(d, tx, ty, 'C');
         d.perks.push({ ...spot, perk: this.perk });
         this.selection = { kind: 'perk', index: d.perks.length - 1 };
         break;
+      }
       case 'armour':
       case 'upgrade':
       case 'power':
@@ -403,6 +408,7 @@ export class Editor {
     const d = this.draft;
     if (at(d, x, y) !== ch) return;
     if (d.box && d.box.ty === y && (d.box.tx === x || d.box.tx + 1 === x)) return;
+    if (ch === 'C' && d.perks.some((s) => s.tx === x && s.ty === y)) return;
     const held = d.decor.some((dc) => dc !== ignore && this.decorDef(dc.kind).solid === ch
       && x >= dc.tx && y >= dc.ty && x < dc.tx + dc.w && y < dc.ty + dc.h);
     if (!held) setCell(d, x, y, '_');
@@ -457,7 +463,11 @@ export class Editor {
     switch (s.kind) {
       case 'start': d.playerStart = null; break;
       case 'wallBuy': d.wallBuys.splice(s.index, 1); break;
-      case 'perk': d.perks.splice(s.index, 1); break;
+      case 'perk': {
+        const [p] = d.perks.splice(s.index, 1);
+        if (p) this.unsolid(p.tx, p.ty, 'C');
+        break;
+      }
       case 'armour': case 'upgrade': case 'power': d[s.kind] = null; break;
       case 'box':
         if (d.box) {
@@ -508,7 +518,15 @@ export class Editor {
     switch (s.kind) {
       case 'start': shift(d.playerStart); break;
       case 'wallBuy': shift(d.wallBuys[s.index]); break;
-      case 'perk': shift(d.perks[s.index]); break;
+      case 'perk': {
+        // Like the box: the old tile goes back to floor and the new one (if floor) becomes its crate.
+        const p = d.perks[s.index];
+        const old = { ...p };
+        shift(p);
+        this.unsolid(old.tx, old.ty, 'C');
+        if (at(d, p.tx, p.ty) === '_') setCell(d, p.tx, p.ty, 'C');
+        break;
+      }
       case 'armour': case 'upgrade': case 'power': shift(d[s.kind]); break;
       case 'box': if (d.box) this.setBox(d.box.tx + dx, d.box.ty + dy); break;
       case 'decor': {
@@ -556,6 +574,10 @@ export class Editor {
 
   wallFacings(x: number, y: number): [number, number][] {
     return wallFacings(this.draft, this.regions, x, y);
+  }
+
+  perkFacings(x: number, y: number): [number, number][] {
+    return perkFacings(this.draft, this.regions, x, y);
   }
 }
 

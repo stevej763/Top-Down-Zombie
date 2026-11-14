@@ -7,7 +7,7 @@ export type TileChar = '.' | '_' | '#' | 'W' | 'C' | 'D' | 'T';
 
 export const TILES: { ch: TileChar; name: string; color: string; hint: string }[] = [
   { ch: '_', name: 'Floor', color: '#7a5a3a', hint: 'Walkable inside' },
-  { ch: '#', name: 'Wall', color: '#4c4c57', hint: 'Blocks everything; wall buys, perks and switches mount here' },
+  { ch: '#', name: 'Wall', color: '#4c4c57', hint: 'Blocks everything; wall buys, benches and switches mount here' },
   { ch: 'W', name: 'Window', color: '#9ab8d8', hint: 'In an outer wall, outside on one side, floor on the other' },
   { ch: 'D', name: 'Door', color: '#b07a40', hint: 'Touching tiles make one door between two rooms' },
   { ch: 'C', name: 'Crate', color: '#6d5130', hint: 'Tall: blocks walking and bullets' },

@@ -63,11 +63,16 @@ export function wallFacings(d: Draft, r: Regions, x: number, y: number): [number
   return DIRS.filter(([dx, dy]) => regionAt(d, r, x + dx, y + dy) >= 0);
 }
 
-function fixFacing(d: Draft, r: Regions, s: WallSpot): void {
-  if (at(d, s.tx, s.ty) !== '#') return;
-  if (Math.abs(s.nx) + Math.abs(s.ny) === 1 && regionAt(d, r, s.tx + s.nx, s.ty + s.ny) >= 0) return;
-  const f = wallFacings(d, r, s.tx, s.ty)[0];
-  if (f) [s.nx, s.ny] = f;
+/** Valid ways a perk machine at (x, y) can face: its back to a wall, its front to a floor tile. */
+export function perkFacings(d: Draft, r: Regions, x: number, y: number): [number, number][] {
+  return DIRS.filter(([dx, dy]) => at(d, x - dx, y - dy) === '#' && regionAt(d, r, x + dx, y + dy) >= 0);
+}
+
+function fixFacing(d: Draft, r: Regions, s: WallSpot, perk = false): void {
+  if (at(d, s.tx, s.ty) !== (perk ? 'C' : '#')) return;
+  const options = (perk ? perkFacings : wallFacings)(d, r, s.tx, s.ty);
+  if (options.some(([x, y]) => x === s.nx && y === s.ny)) return;
+  if (options[0]) [s.nx, s.ny] = options[0];
 }
 
 function doorGroups(d: Draft): [number, number][][] {
@@ -204,7 +209,8 @@ export function normalize(d: Draft): Regions {
   });
 
   d.startRoom = d.playerStart ? nameAt(d.playerStart.tx, d.playerStart.ty) || null : null;
-  for (const s of [...d.wallBuys, ...d.perks, d.armour, d.upgrade, d.power]) if (s) fixFacing(d, r, s);
+  for (const s of [...d.wallBuys, d.armour, d.upgrade, d.power]) if (s) fixFacing(d, r, s);
+  for (const s of d.perks) fixFacing(d, r, s, true);
   return r;
 }
 
