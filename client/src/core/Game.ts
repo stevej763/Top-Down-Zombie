@@ -19,7 +19,7 @@ import { Particles } from '../systems/Particles';
 import { drawHUD } from '../ui/HUD';
 import { Menu } from '../ui/Menu';
 import { drawGameOver } from '../ui/Screens';
-import { buildLevel, restingWorld, type Level } from '../view/Level';
+import { buildLevel, pianoNear, restingWorld, type Level } from '../view/Level';
 import { heldWeapon, type PlayerView, type WorldView } from '../view/WorldView';
 import { Camera } from './Camera';
 import { Input } from './Input';
@@ -442,6 +442,9 @@ export class Game {
     // While the socket is down the server isn't hearing us, so don't predict moves it won't make.
     if (this.link.status === 'open') this.link.send({ type: 'input', inputs: [net.tick(input, dt)] });
     this.world = net.view(this.time) ?? this.world;
+    // The piano is client-only: E near it does nothing on the server unless something real is in reach, which wins.
+    const me = this.me;
+    if (input.interactPressed && me.state === 'alive' && !me.interaction && pianoNear(this.level, me)) sound.piano();
     this.updateDoors();
     this.updateEffects(dt);
     this.updateGroans(dt);

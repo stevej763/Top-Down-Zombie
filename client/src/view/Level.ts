@@ -14,6 +14,27 @@ export interface Level {
   fixtures: Fixture[];
   /** The rooms the power lights up; empty on maps without a power switch. */
   lights: LightArea[];
+  /** Pixel rectangles of the map's pianos (from `decor`), which anyone can play. Client-only fun. */
+  pianos: Rect[];
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** How close to a piano's edge (px, from the player's centre) you can play it. */
+const PIANO_REACH = 30;
+
+/** The piano within reach of `p`, if any. */
+export function pianoNear(level: Level, p: Vec2): Rect | undefined {
+  return level.pianos.find((r) => {
+    const dx = Math.max(r.x - p.x, 0, p.x - (r.x + r.w));
+    const dy = Math.max(r.y - p.y, 0, p.y - (r.y + r.h));
+    return dx * dx + dy * dy < PIANO_REACH * PIANO_REACH;
+  });
 }
 
 /** One room (a flood-filled floor area, as the server's MapValidator finds them) and its ceiling lamps. */
@@ -71,7 +92,10 @@ export function buildLevel(doc: MapDoc): Level {
     }),
   ];
   if (data.power) fixtures.push({ kind: 'power', spot: data.power, ...standOf(data.power) });
-  return { data, windows, fixtures, lights: data.power ? lightAreas(data.map) : [] };
+  const pianos = data.decor
+    .filter((d) => d.kind === 'piano')
+    .map((d): Rect => ({ x: d.tx * TILE, y: d.ty * TILE, w: d.w * TILE, h: d.h * TILE }));
+  return { data, windows, fixtures, lights: data.power ? lightAreas(data.map) : [], pianos };
 }
 
 /** Rooms from the untouched map (doors still shut, so they split rooms), each with lamps spread over it. */
