@@ -2,7 +2,7 @@ import {
   ammoCost, ARMOUR_LEVELS, BOX_COST, magSize, MAX_TIER, PERKS, repairCost, reserveSize, UPGRADE, WEAPONS, weaponName,
 } from '../game/defs';
 import { controlText } from './keys';
-import type { Fixture, Level } from '../view/Level';
+import { pianoNear, type Fixture, type Level } from '../view/Level';
 import { heldWeapon, type InteractableView, type PlayerView, type WorldView } from '../view/WorldView';
 
 export interface Prompt {
@@ -20,7 +20,7 @@ function priced(p: PlayerView, text: string, cost: number): Prompt {
 /** What the HUD shows for a player's current interaction. */
 export function interactionPrompt(level: Level, world: WorldView, p: PlayerView): Prompt | null {
   const it = p.interaction;
-  if (!it) return null;
+  if (!it) return p.state === 'alive' && pianoNear(level, p) ? { text: `${controlText.press} to play the piano`, color: WHITE } : null;
   switch (it.kind) {
     case 'rebuild':
       return { text: `${controlText.hold} to rebuild barricade`, color: WHITE };

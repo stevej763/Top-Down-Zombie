@@ -300,6 +300,24 @@ class Sound {
     [0.12, 0.5, 0.8].forEach((d) => this.tone({ freq: 2600, dur: 0.04, gain: 0.05, type: 'square', delay: d }));
   }
 
+  /** A few notes on the farmhouse upright: a random pentatonic run over a low chord, each press different. */
+  piano(): void {
+    const scale = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];
+    const root = [262, 294, 330, 392][Math.floor(rand(0, 4))];
+    const note = (semis: number, delay: number, gain: number, dur = 0.9) => {
+      const freq = root * 2 ** (semis / 12);
+      this.tone({ freq, dur, gain, type: 'triangle', delay });
+      this.tone({ freq: freq * 2, dur: dur * 0.5, gain: gain * 0.3, delay });
+    };
+    [-12, -5, 0].forEach((s) => note(s, 0, 0.07, 1.4));
+    let step = Math.floor(rand(2, 6));
+    const count = Math.floor(rand(4, 7));
+    for (let i = 0; i < count; i++) {
+      step = Math.min(scale.length - 1, Math.max(0, step + Math.floor(rand(-2, 3))));
+      note(scale[step], i * 0.14 + rand(0, 0.02), 0.13, i === count - 1 ? 1.2 : 0.6);
+    }
+  }
+
   perk(): void {
     [523, 659, 784, 1047].forEach((f, i) => this.tone({ freq: f, dur: 0.18, gain: 0.18, type: 'triangle', delay: i * 0.09 }));
   }
