@@ -12,7 +12,7 @@ Object.assign(controlText, {
   press: 'Tap USE',
   hold: 'Hold USE',
   reload: 'Tap R to reload',
-  confirm: 'Tap',
+  confirm: 'Tap AGAIN',
   toMenu: 'MENU for main menu',
   menuHints: false,
   controls: [

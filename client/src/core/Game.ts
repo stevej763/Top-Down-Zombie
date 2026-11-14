@@ -420,8 +420,9 @@ export class Game {
       case 'gameover':
         this.gameOverTimer += dt;
         this.updateEffects(dt);
+        // Not on a click: players are usually still firing when they go down.
         if (this.gameOverTimer > 1.5) {
-          if (inp.wasPressed('Enter') || inp.mousePressed) this.playAgain();
+          if (inp.wasPressed('Enter')) this.playAgain();
           else if (inp.wasPressed('Escape')) this.toMenu();
         }
         break;

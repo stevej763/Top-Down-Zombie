@@ -8,7 +8,7 @@ export const controlText = {
   hold: 'Hold E',
   reload: 'Press R to reload',
   /** Game over: "… to play again". */
-  confirm: 'Click or press Enter',
+  confirm: 'Press Enter',
   toMenu: 'Esc for main menu',
   /** The keyboard hints along the bottom of the menus. */
   menuHints: true,

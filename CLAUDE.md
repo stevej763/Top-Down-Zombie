@@ -101,7 +101,7 @@ The phone client; `mobile/README.md` has the dev, live-reload and release steps.
 
 | Path | Role |
 |---|---|
-| `src/TouchInput.ts` | Extends `Input`. Floating left stick → WASD (8 directions, so `PlayerMotion` prediction stays exact); right stick → the mouse 120 px ahead of the player, fire held past 55%; aim follows movement while the right thumb is off. USE/R/KNIFE/SWAP/II buttons press keys. Outside play a tap is a click; leaving play releases everything |
+| `src/TouchInput.ts` | Extends `Input`. Floating left stick → WASD (8 directions, so `PlayerMotion` prediction stays exact); right stick → the mouse 120 px ahead of the player, fire held past 55%; aim follows movement while the right thumb is off. USE/R/KNIFE/SWAP/II buttons press keys. Outside play a tap is a click, except at game over, where only MENU (Esc) and AGAIN (the USE button, Enter) do anything; leaving play releases everything |
 | `src/controls.ts`, `src/keyboard.ts`, `src/native.ts` | Layout and drawing of the overlay canvas (safe-area aware); a hidden `<input>` for the phone keyboard on the name/code pages; Capacitor glue (status bar, keep awake, pause on background, Android back = Esc, haptics) |
 
 Not yet run on a device or simulator (headless smoke test only: fake touches through `Game.readInput`). Icons and splash are Capacitor defaults.
