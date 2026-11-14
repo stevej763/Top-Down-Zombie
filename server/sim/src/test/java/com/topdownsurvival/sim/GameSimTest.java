@@ -40,10 +40,11 @@ class GameSimTest {
         return s.players.getFirst();
     }
 
-    /** A sim with no zombies coming. */
+    /** A sim with no zombies coming, and the power already on so the machines can be tested directly. */
     private static GameSim quiet() {
         GameSim s = solo("house", 1);
         s.rounds.intermission = 1e9;
+        s.power = true;
         return s;
     }
 
@@ -305,7 +306,9 @@ class GameSimTest {
 
     @Test
     void mapsWithoutASwitchArePoweredFromTheStart() {
-        GameSim s = quiet();
+        MapDoc d = doc("house");
+        GameSim s = new GameSim(new MapDoc(d.id(), d.name(), d.width(), d.height(), d.tiles(), d.rooms(), d.startRoom(),
+                d.playerStart(), d.windows(), d.doors(), d.wallBuys(), d.perks(), d.armour(), d.upgrade(), d.box(), null, d.decor()), 1);
         assertThat(s.power).isTrue();
         assertThat(s.interactables).noneMatch(it -> it instanceof PowerSwitch);
     }

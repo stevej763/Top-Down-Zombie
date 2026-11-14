@@ -86,6 +86,7 @@
   "armour": {"tx":8,"ty":27,"nx":0,"ny":-1},
   "upgrade": {"tx":24,"ty":27,"nx":0,"ny":-1},
   "box": {"tx":38,"ty":5},
+  "power": {"tx":41,"ty":25,"nx":-1,"ny":0},
   "decor": [
     {"kind":"checker","tx":29,"ty":5,"w":12,"h":10},
     {"kind":"carpet","tx":5,"ty":16,"w":14,"h":11},

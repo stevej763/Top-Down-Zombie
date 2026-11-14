@@ -1,6 +1,6 @@
 # Top Down Survival — top-down zombie survival shooter
 
-Browser game: the player defends a boarded-up house against rounds of zombies. Zombies tear planks off windows and climb in. The player earns points for hits, kills and rebuilding planks, then spends them on doors, wall weapons, perks, armour, weapon upgrades and the mystery box. Zombies get tougher every round. Two maps: **The House** (a furnished living room, kitchen-diner, bedroom with en-suite, and garage; everything powered from the start) and **The Farmstead** (a furnished farmhouse and a barn with a tractor and hay, joined by a covered walkway; the box, perks and upgrade bench are dead and the buildings dark until someone throws the power switch in the barn's generator room).
+Browser game: the player defends a boarded-up house against rounds of zombies. Zombies tear planks off windows and climb in. The player earns points for hits, kills and rebuilding planks, then spends them on doors, wall weapons, perks, armour, weapon upgrades and the mystery box. Zombies get tougher every round. Two maps: **The House** (a furnished living room, kitchen-diner, bedroom with en-suite, and garage; the box, perks and upgrade bench are dead and the house dark until someone throws the breaker in the garage) and **The Farmstead** (a furnished farmhouse and a barn with a tractor and hay, joined by a covered walkway; the box, perks and upgrade bench are dead and the buildings dark until someone throws the power switch in the barn's generator room).
 
 **Stack:**
 - **Client (`client/`):** vanilla Canvas 2D + TypeScript + Vite. No game framework and no runtime dependencies. All art is procedural (drawn in code). All sound effects are synthesized with WebAudio. The only assets are the soundtrack mp3s.
@@ -182,6 +182,8 @@ Visuals, lighting and audio have **not** been checked in a real browser by an ag
 16. **Mobile:** `mobile/`, twin-stick touch controls over the shared client, Capacitor iOS/Android shells (landscape, app id `app.topdownsurvival.game`). Checked headlessly, not yet on a device.
 
 17. **Renamed to Top Down Survival** (was "Boarded Up"): the title logo, page titles, Java packages (`com.topdownsurvival`), the `top-down-survival.*` config prefix, the Postgres db/user (`topdownsurvival`), image and cache names, and the compose project (`name: top-down-survival`, so the old `top-down-zombie_db-data` volume was left behind rather than reused). `localStorage` keys are `top-down-survival-*`; `core/storage.ts` `loadStored` moves a value saved under the old `boarded-up-*` key the first time it's read.
+
+18. **House power + freestanding perks:** perk machines moved off the walls onto their own crate tile against one, on both maps. The House got a power switch on the garage wall by the tool chest, so it now starts dark like the farmstead. The bot's parity runs never reach the new tiles, so `parity.txt` didn't change.
 
 Names (perks, power-ups, "Top Down Survival") are deliberately original; keep it that way rather than copying names from existing games.
 

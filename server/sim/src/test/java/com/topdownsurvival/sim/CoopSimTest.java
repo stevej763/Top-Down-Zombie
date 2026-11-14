@@ -21,6 +21,7 @@ class CoopSimTest {
         GameSim s = new GameSim(TestMaps.load("house"), 1);
         for (int i = 1; i <= n; i++) s.addPlayer(i, "p" + i);
         s.rounds.intermission = 1e9;
+        s.power = true;
         return s;
     }
 
