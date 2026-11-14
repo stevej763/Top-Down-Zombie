@@ -78,6 +78,16 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
   const other = player.weapons[1 - player.slot];
   if (other) shadowText(ctx, `[Q] ${weaponName(other.id, other.tier)}`, right, VIEW_H - 100, '13px monospace', '#8a8a8a', 'right');
 
+  if (game.nowPlaying.timer > 0 && !sound.muted) {
+    ctx.globalAlpha = Math.min(1, game.nowPlaying.timer);
+    shadowText(ctx, `\u266A ${game.nowPlaying.title}`, VIEW_W - 16, 16, '12px monospace', '#b0b0b0', 'right', 'top');
+    ctx.globalAlpha = 1;
+  }
+  if (sound.muted) shadowText(ctx, 'MUTED (M)', VIEW_W - 16, 16, '12px monospace', '#9a9a9a', 'right', 'top');
+
+  // The game-over screen owns the middle of the screen; the corners stay as a record of the run.
+  if (game.state === 'gameover') return;
+
   // Revive and reload progress, or ammo warnings under the crosshair area; none while down.
   let warn = '';
   const it = player.interaction;
@@ -122,13 +132,6 @@ export function drawHUD(ctx: CanvasRenderingContext2D, game: Game): void {
     shadowText(ctx, game.callout.text, VIEW_W / 2, VIEW_H * 0.42, `40px ${DISPLAY_FONT}`, game.callout.color, 'center', 'middle');
     ctx.globalAlpha = 1;
   }
-
-  if (game.nowPlaying.timer > 0 && !sound.muted) {
-    ctx.globalAlpha = Math.min(1, game.nowPlaying.timer);
-    shadowText(ctx, `\u266A ${game.nowPlaying.title}`, VIEW_W - 16, 16, '12px monospace', '#b0b0b0', 'right', 'top');
-    ctx.globalAlpha = 1;
-  }
-  if (sound.muted) shadowText(ctx, 'MUTED (M)', VIEW_W - 16, 16, '12px monospace', '#9a9a9a', 'right', 'top');
 
   // Round banner.
   if (game.banner.timer > 0) {

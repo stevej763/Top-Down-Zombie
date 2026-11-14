@@ -23,7 +23,7 @@ type Binding =
  * Twin-stick touch controls, turned into the keys and mouse `Game` already reads: the left stick
  * holds WASD, the right stick moves the mouse around the player (and holds the button down when
  * pushed far, re-pressing it every tick so semi-autos keep firing at their own rate), buttons press
- * their keys, and outside play a tap is a click.
+ * their keys, and outside play a tap is a click (except at game over, where only the buttons work).
  */
 export class TouchInput extends Input implements KeySink {
   private game: Game | null = null;
@@ -90,16 +90,18 @@ export class TouchInput extends Input implements KeySink {
         }
         continue;
       }
-      // Game over: the pause button becomes MENU (Esc); anywhere else is a click (play again).
-      if (game.state === 'gameover' && button?.id === 'pause') {
-        this.pressed.add('Escape');
+      // Game over: the pause button becomes MENU (Esc) and USE becomes AGAIN (Enter). Other taps do
+      // nothing, so a thumb still on the screen as the player dies doesn't skip the results.
+      if (game.state === 'gameover') {
+        if (button?.id === 'pause') this.pressed.add('Escape');
+        else if (button?.id === 'use') this.pressed.add('Enter');
         continue;
       }
       this.touches.set(t.identifier, { kind: 'menu' });
       this.pointAt(x, y);
       this.mouseDown = true;
       this.mousePressed = true;
-      if (game.state !== 'gameover' && TEXT_PAGES.has(game.menu.page)) this.keyboard.open();
+      if (TEXT_PAGES.has(game.menu.page)) this.keyboard.open();
     }
     this.applySticks();
   }
@@ -251,7 +253,10 @@ export class TouchInput extends Input implements KeySink {
     if (inMenu) return;
     const pause = this.lay.buttons.find((b) => b.id === 'pause')!;
     if (game.state === 'gameover') {
-      if (game.gameOverTimer > 1.5) drawButton(ctx, { ...pause, r: pause.r * 1.4, x: pause.x + pause.r * 0.4, y: pause.y + pause.r * 0.4 }, false, false, 'MENU');
+      if (game.gameOverTimer > 1.5) {
+        drawButton(ctx, { ...pause, r: pause.r * 1.4, x: pause.x + pause.r * 0.4, y: pause.y + pause.r * 0.4 }, false, false, 'MENU');
+        drawButton(ctx, this.lay.buttons.find((b) => b.id === 'use')!, false, true, 'AGAIN');
+      }
       return;
     }
     if (!this.playing) return;
