@@ -32,6 +32,12 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-topdownsurvival}
       # Dev only: delays every /ws message by this many ms each way.
       DEBUG_LATENCY_MS: ${DEBUG_LATENCY_MS:-0}
+      # SMTP for verification codes. The default is the mailpit service below (read at :8025).
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-Top Down Survival <noreply@localhost>}
     depends_on:
       db:
         condition: service_healthy
@@ -59,6 +65,14 @@ services:
       - "8552:80"
     depends_on:
       - server
+    restart: unless-stopped
+
+  # Dev mail catcher: every email the server sends shows up at http://localhost:8025, none leave.
+  # Point MAIL_HOST at a real SMTP provider to send for real.
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"
     restart: unless-stopped
 
 volumes:

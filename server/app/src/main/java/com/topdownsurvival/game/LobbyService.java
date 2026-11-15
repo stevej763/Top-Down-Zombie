@@ -39,7 +39,26 @@ public class LobbyService implements GameRoom.Listener {
     /** No I, L or O, which read like 1 and 0. */
     private static final String CODE_LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ";
     private static final int CODE_LENGTH = 4;
-    static final String GUEST_ONLINE = "Create an account to play online";
+
+    /** What a player may play: guests and accounts that haven't verified their email only solo, on the guest maps. */
+    public enum Access {
+        FULL(null), UNVERIFIED("Verify your email"), GUEST("Create an account");
+
+        /** How to lift the limits, at the start of the refusal. */
+        final String unlock;
+
+        Access(String unlock) {
+            this.unlock = unlock;
+        }
+
+        boolean limited() {
+            return this != FULL;
+        }
+
+        String online() {
+            return unlock + " to play online";
+        }
+    }
 
     private final Function<String, Optional<RoomMap>> maps;
     private final ScoreRecorder scores;
@@ -81,14 +100,14 @@ public class LobbyService implements GameRoom.Listener {
     }
 
     /**
-     * Creates a room and joins it; a solo room starts at once. Guests may only play solo on the
-     * guest maps. Returns an error message, or null.
+     * Creates a room and joins it; a solo room starts at once. Limited players may only play solo on
+     * the guest maps. Returns an error message, or null.
      */
-    public synchronized String create(UUID account, String name, boolean guest, String mapId, boolean solo, Connection conn) {
+    public synchronized String create(UUID account, String name, Access access, String mapId, boolean solo, Connection conn) {
         Optional<RoomMap> map = mapId == null ? Optional.empty() : maps.apply(mapId);
         if (map.isEmpty()) return "No map " + mapId;
-        if (guest && !solo) return GUEST_ONLINE;
-        if (guest && !guestMap(mapId)) return "Create an account to play " + map.get().doc().name();
+        if (access.limited() && !solo) return access.online();
+        if (access.limited() && !guestMap(mapId)) return access.unlock + " to play " + map.get().doc().name();
         leave(account);
         GameRoom room = new GameRoom(newCode(), map.get().doc(), map.get().version(), solo, scores, history, background, clock, seeds, this);
         rooms.put(room.code, room);
@@ -99,8 +118,8 @@ public class LobbyService implements GameRoom.Listener {
         return null;
     }
 
-    public synchronized String join(UUID account, String name, boolean guest, String code, Connection conn) {
-        if (guest) return GUEST_ONLINE;
+    public synchronized String join(UUID account, String name, Access access, String code, Connection conn) {
+        if (access.limited()) return access.online();
         GameRoom room = code == null ? null : rooms.get(code.trim().toUpperCase(Locale.ROOT));
         if (room == null) return "No room " + code;
         if (roomOf.get(account) == room) return "Already in this room";

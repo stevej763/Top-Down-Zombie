@@ -50,7 +50,7 @@ public class AdminController {
 
     public record PlayerRow(UUID id, String name, Instant createdAt, Instant lastSeenAt, boolean online, String room,
             long games, int bestRound, long kills, String lastIp, String platform, String device, String email,
-            Instant accountAt) {}
+            Instant accountAt, Instant emailVerifiedAt) {}
 
     public record PlayerPage(long total, List<PlayerRow> players) {}
 
@@ -242,7 +242,8 @@ public class AdminController {
     private static final String PLAYER_SELECT = """
             SELECT p.id, p.name, p.created_at, p.last_seen_at, count(gp.game_id) AS games,
                    coalesce(max(g.round), 0) AS best, coalesce(sum(gp.kills), 0) AS kills, p.last_ip,
-                   d.platform, concat_ws(' · ', coalesce(d.model, d.os), d.browser), p.email, p.account_at
+                   d.platform, concat_ws(' · ', coalesce(d.model, d.os), d.browser), p.email, p.account_at,
+                   p.email_verified_at
             FROM players p LEFT JOIN LATERAL (SELECT * FROM player_devices WHERE player_id = p.id
                 ORDER BY last_seen_at DESC LIMIT 1) d ON true
             LEFT JOIN game_players gp ON gp.player_id = p.id LEFT JOIN games g ON g.id = gp.game_id
@@ -323,7 +324,7 @@ public class AdminController {
         String device = rs.getString(10);
         return new PlayerRow(id, rs.getString(2), instant(rs, 3), seen, room != null || (seen != null && seen.isAfter(cutoff)),
                 room, rs.getLong(5), rs.getInt(6), rs.getLong(7), rs.getString(8), rs.getString(9),
-                device == null || device.isEmpty() ? null : device, rs.getString(11), instant(rs, 12));
+                device == null || device.isEmpty() ? null : device, rs.getString(11), instant(rs, 12), instant(rs, 13));
     }
 
     // ------------------------------------------------------------- helpers

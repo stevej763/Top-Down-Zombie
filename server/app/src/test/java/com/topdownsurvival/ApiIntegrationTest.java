@@ -6,13 +6,24 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import com.topdownsurvival.mail.Mailer;
 import com.topdownsurvival.player.PlayerRepository;
 import com.topdownsurvival.score.Score;
 import com.topdownsurvival.score.ScoreRepository;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -37,6 +48,41 @@ class ApiIntegrationTest {
 
     @Autowired
     PlayerRepository players;
+
+    /** The last code mailed to each address. */
+    static final Map<String, String> codes = new ConcurrentHashMap<>();
+    /** How far the server's clock is ahead of the real one; tests only move it forward. */
+    static volatile Duration ahead = Duration.ZERO;
+
+    @TestConfiguration
+    static class Fakes {
+        private static final Pattern CODE = Pattern.compile("\\b(\\d{6})\\b");
+
+        @Bean
+        @Primary
+        Mailer capturingMailer() {
+            return (to, subject, body) -> {
+                Matcher m = CODE.matcher(body);
+                if (m.find()) codes.put(to, m.group(1));
+            };
+        }
+
+        @Bean
+        @Primary
+        InstantSource aheadClock() {
+            return () -> Instant.now().plus(ahead);
+        }
+    }
+
+    /** Mail goes out off the request thread, so wait for it. Removes it, so a later call waits for the next one. */
+    private static String codeFor(String email) throws InterruptedException {
+        for (int i = 0; i < 250; i++) {
+            String c = codes.remove(email);
+            if (c != null) return c;
+            Thread.sleep(20);
+        }
+        throw new AssertionError("No code was mailed to " + email);
+    }
 
     private final HttpClient http = HttpClient.newHttpClient();
     private final JsonMapper json = JsonMapper.builder().build();
@@ -205,6 +251,83 @@ class ApiIntegrationTest {
         call("POST", "/api/players/register", null, account("throttle@example.com", "Throttled", "password1"));
         for (int i = 0; i < 6; i++) call("POST", "/api/players/login", null, creds("throttle@example.com", "wrong"));
         assertThat(call("POST", "/api/players/login", null, creds("throttle@example.com", "password1")).status()).isEqualTo(429);
+    }
+
+    private String signUp(String email, String name) throws Exception {
+        Res r = call("POST", "/api/players/register", null, account(email, name, "password1"));
+        assertThat(r.status()).isEqualTo(201);
+        assertThat(r.body().get("verified").asBoolean()).isFalse();
+        return r.body().get("token").asString();
+    }
+
+    private Res verify(String token, String code) throws Exception {
+        return call("POST", "/api/players/me/verify", token, "{\"code\":\"" + code + "\"}");
+    }
+
+    private static String wrong(String code) {
+        return code.equals("000000") ? "000001" : "000000";
+    }
+
+    @Test
+    void signingUpMailsACodeThatVerifiesTheEmail() throws Exception {
+        String t = signUp("verify@example.com", "Verifier");
+        String code = codeFor("verify@example.com");
+        assertThat(call("GET", "/api/players/me", t, null).body().get("verified").asBoolean()).isFalse();
+
+        Res bad = verify(t, wrong(code));
+        assertThat(bad.status()).isEqualTo(400);
+        assertThat(bad.body().get("message").asString()).isEqualTo("That code is wrong");
+        // Spaces are forgiven ("123 456").
+        assertThat(verify(t, code.substring(0, 3) + " " + code.substring(3)).status()).isEqualTo(204);
+        assertThat(call("GET", "/api/players/me", t, null).body().get("verified").asBoolean()).isTrue();
+        assertThat(call("POST", "/api/players/login", null, creds("verify@example.com", "password1")).body().get("verified").asBoolean())
+                .isTrue();
+        assertThat(verify(t, code).status()).isEqualTo(204);
+        assertThat(call("POST", "/api/players/me/verify/resend", t, null).status()).isEqualTo(409);
+    }
+
+    @Test
+    void fiveWrongCodesSpendTheCode() throws Exception {
+        String t = signUp("guesser@example.com", "Guesser");
+        String code = codeFor("guesser@example.com");
+        for (int i = 0; i < 4; i++) assertThat(verify(t, wrong(code)).body().get("message").asString()).isEqualTo("That code is wrong");
+        assertThat(verify(t, wrong(code)).body().get("message").asString()).startsWith("Too many wrong codes");
+        Res late = verify(t, code);
+        assertThat(late.status()).isEqualTo(400);
+        assertThat(late.body().get("message").asString()).isEqualTo("Ask for a new code");
+    }
+
+    @Test
+    void aNewCodeReplacesTheOldOneButNotWithinAMinute() throws Exception {
+        String t = signUp("resend@example.com", "Resender");
+        String first = codeFor("resend@example.com");
+        Res soon = call("POST", "/api/players/me/verify/resend", t, null);
+        assertThat(soon.status()).isEqualTo(429);
+        assertThat(soon.body().get("message").asString()).startsWith("Wait");
+
+        ahead = ahead.plusSeconds(61);
+        assertThat(call("POST", "/api/players/me/verify/resend", t, null).status()).isEqualTo(204);
+        String second = codeFor("resend@example.com");
+        if (!first.equals(second)) assertThat(verify(t, first).body().get("message").asString()).isEqualTo("That code is wrong");
+        assertThat(verify(t, second).status()).isEqualTo(204);
+    }
+
+    @Test
+    void codesExpire() throws Exception {
+        String t = signUp("slow@example.com", "Slowpoke");
+        String code = codeFor("slow@example.com");
+        ahead = ahead.plusMinutes(16);
+        Res r = verify(t, code);
+        assertThat(r.status()).isEqualTo(400);
+        assertThat(r.body().get("message").asString()).contains("expired");
+    }
+
+    @Test
+    void guestsHaveNothingToVerify() throws Exception {
+        String t = newPlayer("Unmailed").token();
+        assertThat(verify(t, "123456").status()).isEqualTo(400);
+        assertThat(call("POST", "/api/players/me/verify/resend", t, null).status()).isEqualTo(400);
+        assertThat(verify(null, "123456").status()).isEqualTo(401);
     }
 
     @Test

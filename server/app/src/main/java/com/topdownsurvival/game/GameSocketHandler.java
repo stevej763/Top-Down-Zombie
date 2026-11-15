@@ -92,7 +92,7 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
         SocketConnection conn = connections.get(session.getId());
         if (conn == null) return;
         String payload = message.getPayload();
-        inbound(() -> handle(account(session), name(session), guest(session), conn, payload));
+        inbound(() -> handle(account(session), name(session), access(session), conn, payload));
     }
 
     @Override
@@ -126,7 +126,7 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
         return connections.size();
     }
 
-    private void handle(UUID account, String name, boolean guest, SocketConnection conn, String payload) {
+    private void handle(UUID account, String name, LobbyService.Access access, SocketConnection conn, String payload) {
         ClientMessage msg;
         try {
             msg = json.readValue(payload, ClientMessage.class);
@@ -140,8 +140,8 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
         }
         GameRoom room = lobby.roomOf(account).orElse(null);
         String error = switch (msg) {
-            case ClientMessage.Create c -> lobby.create(account, name, guest, c.mapId(), c.solo(), conn);
-            case ClientMessage.Join j -> lobby.join(account, name, guest, j.code(), conn);
+            case ClientMessage.Create c -> lobby.create(account, name, access, c.mapId(), c.solo(), conn);
+            case ClientMessage.Join j -> lobby.join(account, name, access, j.code(), conn);
             case ClientMessage.Ready r -> room == null ? "Not in a room" : room.ready(account, r.ready());
             case ClientMessage.Start _ -> room == null ? "Not in a room" : room.start(account);
             case ClientMessage.Input i -> {
@@ -182,8 +182,8 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
         return (String) s.getAttributes().get(TokenHandshakeInterceptor.NAME);
     }
 
-    private static boolean guest(WebSocketSession s) {
-        return Boolean.TRUE.equals(s.getAttributes().get(TokenHandshakeInterceptor.GUEST));
+    private static LobbyService.Access access(WebSocketSession s) {
+        return (LobbyService.Access) s.getAttributes().get(TokenHandshakeInterceptor.ACCESS);
     }
 
     @Override

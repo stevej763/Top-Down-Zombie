@@ -31,6 +31,13 @@ top-down-survival:
     password: ${ADMIN_PASSWORD:}
   # Maps guests (players without an account) may play, solo only. Everything else needs an account.
   guest-maps: ${GUEST_MAPS:house}
+  # SMTP for the email verification codes. With no host, emails are written to the log instead.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:Top Down Survival <noreply@localhost>}
   debug:
     # Dev only: delays every /ws message by this much in each direction, to try client prediction.
     latency-ms: ${DEBUG_LATENCY_MS:0}
