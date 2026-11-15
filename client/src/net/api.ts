@@ -1,5 +1,6 @@
 import { loadStored } from '../core/storage';
 import type { MapDoc } from '../game/MapData';
+import { deviceReport } from './device';
 import { apiUrl } from './server';
 
 /** REST client for the Spring Boot server. Every call can fail (server down, offline); callers fall back. */
@@ -132,7 +133,7 @@ const HEARTBEAT_MS = 30_000;
 
 /**
  * Tells the server the app is open, every 30 s while the page is visible, so the admin portal can
- * show who's online. Only once the player has registered (named themselves); failures are ignored.
+ * show who's online and on what device. Only once the player has registered (named themselves); failures are ignored.
  */
 export function startHeartbeat(): void {
   const beat = (): void => {
@@ -140,7 +141,8 @@ export function startHeartbeat(): void {
     if (!token || document.visibilityState !== 'visible') return;
     fetch(apiUrl('/players/me/seen'), {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(deviceReport()),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     }).catch(() => {});
   };
