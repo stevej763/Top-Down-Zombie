@@ -79,9 +79,19 @@ class AdminApiTest {
     @Test
     void everythingNeedsASession() throws Exception {
         for (String path : new String[] {"/api/admin/me", "/api/admin/overview", "/api/admin/live", "/api/admin/games",
-                "/api/admin/players", "/api/admin/admins"}) {
+                "/api/admin/players", "/api/admin/maps", "/api/admin/admins"}) {
             assertThat(get(path, null).status()).as(path).isEqualTo(401);
             assertThat(get(path, "tds_admin=forged").status()).as(path).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void mapsAreListedWithTheirStats() throws Exception {
+        JsonNode maps = get("/api/admin/maps", login("root", "root-password")).body();
+        assertThat(maps.findValuesAsString("id")).contains("house", "farmstead");
+        for (JsonNode m : maps) {
+            assertThat(m.get("width").asInt()).as(m.get("id").asString()).isPositive();
+            assertThat(m.get("version").asInt()).isPositive();
         }
     }
 
