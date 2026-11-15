@@ -1,7 +1,9 @@
+import type { TextKind } from '../../client/src/ui/Menu';
+
 /**
- * Brings up the phone's keyboard for the menu's text fields (name, room code). The canvas can't take
- * focus, so an invisible <input> does, and what's typed into it is fed to the game as if from keys.
- * It holds one sentinel character so a Backspace always has something to delete and shows up as an
+ * Brings up the phone's keyboard for the menu's text fields (name, room code, email, password). The
+ * canvas can't take focus, so an invisible <input> does, and what's typed into it is fed to the game
+ * as if from keys. It holds one sentinel character so a Backspace always has something to delete and shows up as an
  * `input` event, whatever the keyboard.
  */
 const SENTINEL = ' ';
@@ -35,8 +37,14 @@ export class Keyboard {
     return document.activeElement === this.el;
   }
 
-  /** Must run inside a touch handler: iOS only opens the keyboard for a user gesture. */
-  open(): void {
+  /**
+   * Must run inside a touch handler: iOS only opens the keyboard for a user gesture. `kind` picks the
+   * keyboard: an email layout, or a password field the phone won't autocorrect, suggest or remember.
+   */
+  open(kind: TextKind = 'text'): void {
+    const type = kind === 'password' ? 'password' : kind === 'email' ? 'email' : 'text';
+    if (this.el.type !== type) this.el.type = type;
+    this.el.inputMode = kind === 'email' ? 'email' : 'text';
     this.el.value = SENTINEL;
     if (!this.isOpen) this.el.focus();
   }

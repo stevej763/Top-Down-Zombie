@@ -11,8 +11,6 @@ const FIRE_AT = 0.55;
 /** How far ahead of the player (view px) the virtual mouse sits, so `Game.readInput` aims along the stick. */
 const AIM_DIST = 120;
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
-/** Menu pages with a text field, where a tap brings up the keyboard. */
-const TEXT_PAGES = new Set(['name', 'join']);
 
 type Binding =
   | { kind: 'move' | 'aim'; stick: Stick }
@@ -101,7 +99,8 @@ export class TouchInput extends Input implements KeySink {
       this.pointAt(x, y);
       this.mouseDown = true;
       this.mousePressed = true;
-      if (TEXT_PAGES.has(game.menu.page)) this.keyboard.open();
+      const kind = game.state === 'menu' || game.state === 'paused' ? game.menu.textKindAt(game, this.mouse) : null;
+      if (kind) this.keyboard.open(kind);
     }
     this.applySticks();
   }
@@ -249,7 +248,8 @@ export class TouchInput extends Input implements KeySink {
     ctx.clearRect(0, 0, w, h);
     if (!game) return;
     const inMenu = game.state === 'menu' || game.state === 'paused';
-    if (!(inMenu && TEXT_PAGES.has(game.menu.page))) this.keyboard.close();
+    // Enter on the keyboard moves to the next field or submits; any other selection puts it away.
+    if (!(inMenu && game.menu.selectedTextKind(game))) this.keyboard.close();
     if (inMenu) return;
     const pause = this.lay.buttons.find((b) => b.id === 'pause')!;
     if (game.state === 'gameover') {
