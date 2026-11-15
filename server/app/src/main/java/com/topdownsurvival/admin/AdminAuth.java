@@ -1,5 +1,6 @@
 package com.topdownsurvival.admin;
 
+import com.topdownsurvival.auth.LoginThrottle;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -12,10 +13,8 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.Base64;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -39,19 +38,12 @@ public class AdminAuth {
     private static final Duration TOUCH_EVERY = Duration.ofMinutes(1);
     static final int MIN_PASSWORD = 10;
 
-    /**
-     * Failures allowed per username, and per address, before each further attempt waits; the wait
-     * doubles per failure, up to {@link #MAX_LOCK}. An address gets more, since several admins may share one.
-     */
-    static final int FREE_FAILURES = 5;
-    static final int FREE_FAILURES_PER_IP = 20;
-    static final Duration MAX_LOCK = Duration.ofMinutes(15);
+    /** Failures allowed per username before each further attempt waits (see {@link LoginThrottle}). */
+    static final int FREE_FAILURES = LoginThrottle.FREE_FAILURES;
 
     public record Admin(UUID id, String username) {}
 
     public record Session(String token, Admin admin) {}
-
-    private record Failures(int count, Instant lockedUntil) {}
 
     private final JdbcClient db;
     private final InstantSource clock;
@@ -59,7 +51,7 @@ public class AdminAuth {
     private final SecureRandom random = new SecureRandom();
     /** Checked against when the username is unknown, so a miss takes as long as a wrong password. */
     private final String dummyHash;
-    private final Map<String, Failures> failures = new ConcurrentHashMap<>();
+    private final LoginThrottle throttle = new LoginThrottle();
 
     public AdminAuth(JdbcClient db, InstantSource clock) {
         this.db = db;
@@ -73,24 +65,17 @@ public class AdminAuth {
     public Session login(String username, String password, String ip) {
         String user = normalize(username);
         Instant now = clock.instant();
-        for (String key : new String[] {"u:" + user, "ip:" + ip}) {
-            Failures f = failures.get(key);
-            if (f != null && f.lockedUntil() != null && now.isBefore(f.lockedUntil())) {
-                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many attempts; try again shortly");
-            }
-        }
+        throttle.check(user, ip, now);
         var row = db.sql("SELECT id, username, password_hash FROM admin_users WHERE username = ?")
                 .param(user)
                 .query((rs, _) -> new Object[] {rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)})
                 .optional();
         boolean ok = bcrypt.matches(password == null ? "" : password, row.map(r -> (String) r[2]).orElse(dummyHash));
         if (row.isEmpty() || !ok) {
-            failed("u:" + user, FREE_FAILURES, now);
-            failed("ip:" + ip, FREE_FAILURES_PER_IP, now);
+            throttle.failed(user, ip, now);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Wrong username or password");
         }
-        failures.remove("u:" + user);
-        failures.remove("ip:" + ip);
+        throttle.succeeded(user, ip);
         Admin admin = new Admin((UUID) row.get()[0], (String) row.get()[1]);
         String token = newToken();
         db.sql("INSERT INTO admin_sessions (id, token_hash, admin_id, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)")
@@ -101,15 +86,6 @@ public class AdminAuth {
                 .params(ts(now), ts(now.minus(IDLE)))
                 .update();
         return new Session(token, admin);
-    }
-
-    private void failed(String key, int free, Instant now) {
-        failures.compute(key, (_, f) -> {
-            int count = f == null ? 1 : f.count() + 1;
-            if (count <= free) return new Failures(count, null);
-            long secs = Math.min(MAX_LOCK.toSeconds(), 1L << Math.min(20, count - free));
-            return new Failures(count, now.plusSeconds(secs));
-        });
     }
 
     /** The admin a raw session token belongs to, if it's still live. Refreshes its idle timer. */

@@ -11,12 +11,22 @@ const TIMEOUT_MS = 5000;
 const NAME_RE = /^[\p{L}\p{N}_.'-]([\p{L}\p{N} _.'-]{0,18}[\p{L}\p{N}_.'-])?$/u;
 export const NAME_MAX = 20;
 
-/** `token` is missing until the server has registered the name (it may have been unreachable). */
+/**
+ * `token` is missing until the server has registered the name (it may have been unreachable), or,
+ * for an account, once the server has signed this device out (log in again). Guests have no `email`.
+ */
 export interface Identity {
   name: string;
   playerId?: string;
   token?: string;
+  account?: boolean;
+  email?: string;
 }
+
+/** What account calls resolve to: null when it worked, otherwise a message to show. */
+export type Outcome = string | null;
+
+const OFFLINE = "Can't reach the server";
 
 export interface ServerScore {
   id: number;
@@ -26,12 +36,16 @@ export interface ServerScore {
   points: number;
   partySize: number;
   date: number;
+  /** The player has no account. */
+  guest: boolean;
 }
 
 export interface MapSummary {
   id: string;
   name: string;
   version: number;
+  /** Guests may play it (solo). Every other map, and co-op, needs an account. */
+  guest: boolean;
 }
 
 export function validName(name: string): boolean {
@@ -47,15 +61,31 @@ export function loadIdentity(): Identity | null {
   }
 }
 
-function saveIdentity(id: Identity): void {
+function saveIdentity(id: Identity | null): void {
   try {
-    localStorage.setItem(IDENTITY_KEY, JSON.stringify(id));
+    if (id) localStorage.setItem(IDENTITY_KEY, JSON.stringify(id));
+    else localStorage.removeItem(IDENTITY_KEY);
   } catch {
     // Storage unavailable; the identity lasts for this session only.
   }
 }
 
-/** A failed request; `status` is 0 when the server didn't answer. */
+export function isAccount(): boolean {
+  return loadIdentity()?.account === true;
+}
+
+/** An account this device has been signed out of (by a password change elsewhere): it needs to log in again. */
+export function needsLogin(): boolean {
+  const id = loadIdentity();
+  return id?.account === true && !id.token;
+}
+
+/** Whether this player may start this map: guests only play guest maps, solo. */
+export function canPlay(map: MapSummary | undefined, solo: boolean): boolean {
+  return isAccount() || (solo && map?.guest === true);
+}
+
+/** A failed request; `status` is 0 when the server didn't answer. `message` is the server's, when it gave one. */
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -65,56 +95,147 @@ export class ApiError extends Error {
 async function request<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(apiUrl(path), {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!res.ok) throw new ApiError(`${method} ${path}: ${res.status}`, res.status);
-  return res.json() as Promise<T>;
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    throw new ApiError(OFFLINE, 0);
+  }
+  if (!res.ok) {
+    let message = `${method} ${path}: ${res.status}`;
+    try {
+      const j = (await res.json()) as { message?: string };
+      if (j.message) message = j.message;
+    } catch {
+      // No JSON body.
+    }
+    throw new ApiError(message, res.status);
+  }
+  return (res.status === 204 ? undefined : res.json()) as Promise<T>;
+}
+
+function problem(e: unknown): string {
+  return e instanceof ApiError ? e.message : OFFLINE;
+}
+
+/** The server forgot this device's token: a guest registers afresh later; an account has to log in again. */
+function tokenRejected(id: Identity): void {
+  delete id.token;
+  if (!id.account) delete id.playerId;
+  saveIdentity(id);
+}
+
+interface SignedIn {
+  playerId: string;
+  name: string;
+  token: string;
+  account: boolean;
 }
 
 /**
- * Save the name locally straight away, then register it with the server (or rename the existing
- * player). Resolves to the identity, with a token if the server answered.
+ * Save the name locally, then register it with the server (or rename the existing player).
+ * Resolves to null, or why the server refused the name (taken by an account), in which case the
+ * old name is kept. Offline, the local name stays and registration is retried when connecting.
  */
-export async function setName(name: string): Promise<Identity> {
+export async function setName(name: string): Promise<Outcome> {
   const current = loadIdentity();
   const id: Identity = { ...current, name };
-  saveIdentity(id);
   try {
     if (id.token) {
       try {
         await request('PATCH', '/players/me', { name }, id.token);
-        return id;
+        saveIdentity(id);
+        return null;
       } catch (e) {
-        // The server no longer knows this token (its database was reset): register afresh.
+        // The server no longer knows this token (its database was reset, or the account signed this device out).
         if (!(e instanceof ApiError && e.status === 401)) throw e;
-        delete id.token;
-        delete id.playerId;
+        tokenRejected(id);
+        if (id.account) return 'Log in again';
       }
     }
-    const r = await request<{ playerId: string; token: string }>('POST', '/players', { name });
-    id.playerId = r.playerId;
-    id.token = r.token;
-    saveIdentity(id);
-  } catch {
-    // Offline: keep the local name; registration is retried when connecting to a game.
+    if (id.account) return 'Log in again';
+    const r = await request<SignedIn>('POST', '/players', { name });
+    saveIdentity({ name, playerId: r.playerId, token: r.token });
+    return null;
+  } catch (e) {
+    if (e instanceof ApiError && e.status !== 0) return e.message;
+    if (!id.account) saveIdentity(id);
+    return null;
   }
-  return id;
+}
+
+/** Creates an account. A guest's identity becomes the account, keeping their scores. */
+export async function register(email: string, username: string, password: string): Promise<Outcome> {
+  const current = loadIdentity();
+  try {
+    const guestToken = current && !current.account ? current.token : undefined;
+    const r = await request<SignedIn>('POST', '/players/register', { email, username, password }, guestToken);
+    saveIdentity({ name: r.name, playerId: r.playerId, token: r.token, account: true, email: email.trim().toLowerCase() });
+    return null;
+  } catch (e) {
+    return problem(e);
+  }
+}
+
+/** Signs in to an account on this device; any guest identity here is left behind. */
+export async function login(email: string, password: string): Promise<Outcome> {
+  try {
+    const r = await request<SignedIn>('POST', '/players/login', { email, password });
+    saveIdentity({ name: r.name, playerId: r.playerId, token: r.token, account: true, email: email.trim().toLowerCase() });
+    return null;
+  } catch (e) {
+    return problem(e);
+  }
+}
+
+/** Signs this device out and forgets the identity, guest or account. */
+export async function logout(): Promise<void> {
+  const token = loadIdentity()?.token;
+  saveIdentity(null);
+  if (token) await request('POST', '/players/logout', undefined, token).catch(() => {});
+}
+
+export async function changePassword(current: string, password: string): Promise<Outcome> {
+  const token = loadIdentity()?.token;
+  if (!token) return 'Log in again';
+  try {
+    await request('PATCH', '/players/me/password', { current, password }, token);
+    return null;
+  } catch (e) {
+    return problem(e);
+  }
+}
+
+/** Brings the saved identity up to date with the server (name, account), e.g. after a change on another device. */
+export async function refreshMe(): Promise<void> {
+  const id = loadIdentity();
+  if (!id?.token) return;
+  try {
+    const me = await request<{ name: string; account: boolean; email: string | null }>('GET', '/players/me', undefined, id.token);
+    saveIdentity({ ...id, name: me.name, account: me.account, email: me.email ?? undefined });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) tokenRejected(id);
+  }
 }
 
 /**
- * The identity with a server token, registering it first if needed. With `verify`, the token is
- * checked (and replaced if the server rejects it). Null if there's no name or no server.
+ * The identity with a server token, registering a guest first if needed. With `verify`, the token
+ * is checked (and a guest's replaced if the server rejects it). Null if there's no name, no
+ * server, or an account that has to log in again.
  */
 export async function ensureRegistered(verify = false): Promise<Identity | null> {
   const id = loadIdentity();
   if (!id) return null;
   if (id.token && !verify) return id;
-  const r = await setName(id.name);
-  return r.token ? r : null;
+  if (id.account && !id.token) return null;
+  await setName(id.name);
+  const r = loadIdentity();
+  return r?.token ? r : null;
 }
 
 export function fetchMaps(): Promise<MapSummary[]> {

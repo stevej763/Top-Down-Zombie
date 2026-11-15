@@ -29,6 +29,8 @@ top-down-survival:
   admin:
     username: ${ADMIN_USERNAME:}
     password: ${ADMIN_PASSWORD:}
+  # Maps guests (players without an account) may play, solo only. Everything else needs an account.
+  guest-maps: ${GUEST_MAPS:house}
   debug:
     # Dev only: delays every /ws message by this much in each direction, to try client prediction.
     latency-ms: ${DEBUG_LATENCY_MS:0}

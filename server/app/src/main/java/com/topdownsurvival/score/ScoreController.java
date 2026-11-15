@@ -16,11 +16,14 @@ public class ScoreController {
     static final String MAP_ID_PATTERN = "^[a-z0-9-]{1,40}$";
     private static final int MAX_LIMIT = 100;
 
-    /** {@code date} is epoch ms, matching the client's ScoreEntry. */
-    public record ScoreView(long id, String name, int round, int kills, int points, int partySize, long date) {
+    /**
+     * {@code date} is epoch ms, matching the client's ScoreEntry. {@code guest} is whether the player
+     * has no account now, so a guest's runs lose the tag when they sign up.
+     */
+    public record ScoreView(long id, String name, int round, int kills, int points, int partySize, long date, boolean guest) {
         static ScoreView of(Score s) {
             return new ScoreView(s.getId(), s.getPlayer().getName(), s.getRound(), s.getKills(), s.getPoints(),
-                    s.getPartySize(), s.getCreatedAt().toEpochMilli());
+                    s.getPartySize(), s.getCreatedAt().toEpochMilli(), !s.getPlayer().isAccount());
         }
     }
 

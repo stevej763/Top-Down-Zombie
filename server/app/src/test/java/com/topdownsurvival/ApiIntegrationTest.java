@@ -113,6 +113,106 @@ class ApiIntegrationTest {
         assertThat(call("PATCH", "/api/players/me", "not-a-token", "{\"name\":\"Nobody\"}").status()).isEqualTo(401);
     }
 
+    private static String account(String email, String username, String password) {
+        return "{\"email\":\"" + email + "\",\"username\":\"" + username + "\",\"password\":\"" + password + "\"}";
+    }
+
+    private static String creds(String email, String password) {
+        return "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}";
+    }
+
+    @Test
+    void aGuestBecomesAnAccountAndKeepsTheirScores() throws Exception {
+        NewPlayer g = newPlayer("Upgrader");
+        score(g, "upgrade-test", 4, 4, 4);
+        assertThat(call("GET", "/api/scores?map=upgrade-test", null, null).body().get(0).get("guest").asBoolean()).isTrue();
+        assertThat(call("GET", "/api/players/me", g.token(), null).body().get("account").asBoolean()).isFalse();
+
+        Res r = call("POST", "/api/players/register", g.token(), account("Up@Example.com", "Upgraded", "password1"));
+        assertThat(r.status()).isEqualTo(201);
+        assertThat(r.body().get("playerId").asString()).isEqualTo(g.id().toString());
+        assertThat(r.body().get("token").asString()).isEqualTo(g.token());
+
+        Res me = call("GET", "/api/players/me", g.token(), null);
+        assertThat(me.body().get("account").asBoolean()).isTrue();
+        assertThat(me.body().get("email").asString()).isEqualTo("up@example.com");
+        JsonNode row = call("GET", "/api/scores?map=upgrade-test", null, null).body().get(0);
+        assertThat(row.get("name").asString()).isEqualTo("Upgraded");
+        assertThat(row.get("guest").asBoolean()).isFalse();
+        // Already an account.
+        assertThat(call("POST", "/api/players/register", g.token(), account("other@example.com", "Other", "password1")).status())
+                .isEqualTo(409);
+    }
+
+    @Test
+    void emailsAndAccountNamesAreUnique() throws Exception {
+        assertThat(call("POST", "/api/players/register", null, account("taken@example.com", "Taken", "password1")).status()).isEqualTo(201);
+        Res dupEmail = call("POST", "/api/players/register", null, account("TAKEN@example.com", "Fresh", "password1"));
+        assertThat(dupEmail.status()).isEqualTo(409);
+        assertThat(dupEmail.body().get("message").asString()).contains("email");
+        assertThat(call("POST", "/api/players/register", null, account("fresh@example.com", "taken", "password1")).status()).isEqualTo(409);
+        // Guests can't take an account's name, but may share names with each other.
+        assertThat(call("POST", "/api/players", null, "{\"name\":\"TAKEN\"}").status()).isEqualTo(409);
+        NewPlayer g = newPlayer("Twin");
+        newPlayer("Twin");
+        assertThat(call("PATCH", "/api/players/me", g.token(), "{\"name\":\"Taken\"}").status()).isEqualTo(409);
+    }
+
+    @Test
+    void registrationChecksItsFields() throws Exception {
+        Res r = call("POST", "/api/players/register", null, account("not-an-email", "Checker", "password1"));
+        assertThat(r.status()).isEqualTo(400);
+        assertThat(r.body().get("message").asString()).contains("email");
+        assertThat(call("POST", "/api/players/register", null, account("short@example.com", "Checker", "short")).status()).isEqualTo(400);
+        assertThat(call("POST", "/api/players/register", null, account("long@example.com", "Checker", "x".repeat(73))).status()).isEqualTo(400);
+        assertThat(call("POST", "/api/players/register", null, account("name@example.com", "<bad>", "password1")).status()).isEqualTo(400);
+    }
+
+    @Test
+    void loginGivesEachDeviceItsOwnToken() throws Exception {
+        String first = call("POST", "/api/players/register", null, account("devices@example.com", "Devices", "password1"))
+                .body().get("token").asString();
+        Res wrong = call("POST", "/api/players/login", null, creds("devices@example.com", "nope"));
+        assertThat(wrong.status()).isEqualTo(401);
+        Res ok = call("POST", "/api/players/login", null, creds(" Devices@example.com ", "password1"));
+        assertThat(ok.status()).isEqualTo(200);
+        assertThat(ok.body().get("name").asString()).isEqualTo("Devices");
+        String second = ok.body().get("token").asString();
+        assertThat(second).isNotEqualTo(first);
+
+        assertThat(call("GET", "/api/players/me", first, null).status()).isEqualTo(200);
+        assertThat(call("POST", "/api/players/logout", second, null).status()).isEqualTo(204);
+        assertThat(call("GET", "/api/players/me", second, null).status()).isEqualTo(401);
+        assertThat(call("GET", "/api/players/me", first, null).status()).isEqualTo(200);
+    }
+
+    @Test
+    void changingThePasswordSignsOutOtherDevices() throws Exception {
+        String here = call("POST", "/api/players/register", null, account("pw@example.com", "Rotator", "password1")).body().get("token").asString();
+        String there = call("POST", "/api/players/login", null, creds("pw@example.com", "password1")).body().get("token").asString();
+        assertThat(call("PATCH", "/api/players/me/password", here, "{\"current\":\"wrong\",\"password\":\"password2\"}").status())
+                .isEqualTo(403);
+        assertThat(call("PATCH", "/api/players/me/password", here, "{\"current\":\"password1\",\"password\":\"password2\"}").status())
+                .isEqualTo(204);
+        assertThat(call("GET", "/api/players/me", here, null).status()).isEqualTo(200);
+        assertThat(call("GET", "/api/players/me", there, null).status()).isEqualTo(401);
+        assertThat(call("POST", "/api/players/login", null, creds("pw@example.com", "password1")).status()).isEqualTo(401);
+        assertThat(call("POST", "/api/players/login", null, creds("pw@example.com", "password2")).status()).isEqualTo(200);
+    }
+
+    @Test
+    void repeatedFailedLoginsAreThrottled() throws Exception {
+        call("POST", "/api/players/register", null, account("throttle@example.com", "Throttled", "password1"));
+        for (int i = 0; i < 6; i++) call("POST", "/api/players/login", null, creds("throttle@example.com", "wrong"));
+        assertThat(call("POST", "/api/players/login", null, creds("throttle@example.com", "password1")).status()).isEqualTo(429);
+    }
+
+    @Test
+    void theMapListSaysWhichMapsGuestsMayPlay() throws Exception {
+        JsonNode maps = call("GET", "/api/maps", null, null).body();
+        for (JsonNode m : maps) assertThat(m.get("guest").asBoolean()).isEqualTo(m.get("id").asString().equals("house"));
+    }
+
     @Test
     void rejectsBadMapIds() throws Exception {
         assertThat(call("GET", "/api/scores?map=Bad%20Map!", null, null).status()).isEqualTo(400);

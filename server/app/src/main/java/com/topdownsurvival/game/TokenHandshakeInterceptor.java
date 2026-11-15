@@ -16,6 +16,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 final class TokenHandshakeInterceptor implements HandshakeInterceptor {
     static final String ACCOUNT = "account";
     static final String NAME = "name";
+    /** True for a guest, who may only play solo on the guest maps. */
+    static final String GUEST = "guest";
     static final String IP = "ip";
 
     private final PlayerAuth auth;
@@ -35,6 +37,7 @@ final class TokenHandshakeInterceptor implements HandshakeInterceptor {
         }
         attributes.put(ACCOUNT, player.get().getId());
         attributes.put(NAME, player.get().getName());
+        attributes.put(GUEST, !player.get().isAccount());
         // The servlet request's address honours X-Forwarded-For (forward-headers-strategy).
         if (request instanceof ServletServerHttpRequest servlet) attributes.put(IP, servlet.getServletRequest().getRemoteAddr());
         return true;

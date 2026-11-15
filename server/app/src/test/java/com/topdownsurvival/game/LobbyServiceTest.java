@@ -18,7 +18,7 @@ class LobbyServiceTest {
     int stopped;
 
     final LobbyService lobby = new LobbyService(
-            id -> id.equals("house") ? Optional.of(new LobbyService.RoomMap(FakeConnection.map("house"), 1)) : Optional.empty(),
+            id -> id.equals("house") || id.equals("farmstead") ? Optional.of(new LobbyService.RoomMap(FakeConnection.map(id), 1)) : Optional.empty(),
             (_, _, _, _, results) -> results.stream().map(_ -> 0).toList(),
             GameRecorder.NONE,
             Runnable::run,
@@ -26,7 +26,7 @@ class LobbyServiceTest {
                 ticks.add(tick);
                 return () -> stopped++;
             },
-            clock, () -> 1);
+            clock, () -> 1, Set.of("house"));
 
     record Client(UUID account, String name, FakeConnection conn) {}
 
@@ -35,12 +35,12 @@ class LobbyServiceTest {
     }
 
     String create(Client c, boolean solo) {
-        assertThat(lobby.create(c.account(), c.name(), "house", solo, c.conn())).isNull();
+        assertThat(lobby.create(c.account(), c.name(), false, "house", solo, c.conn())).isNull();
         return c.conn().last(ServerMessage.Welcome.class).room().code();
     }
 
     String join(Client c, String code) {
-        return lobby.join(c.account(), c.name(), code, c.conn());
+        return lobby.join(c.account(), c.name(), false, code, c.conn());
     }
 
     @Test
@@ -53,9 +53,31 @@ class LobbyServiceTest {
     }
 
     @Test
+    void guestsOnlyPlaySoloOnGuestMaps() {
+        Client g = client("Guest");
+        assertThat(lobby.create(g.account(), g.name(), true, "house", false, g.conn())).isEqualTo(LobbyService.GUEST_ONLINE);
+        assertThat(lobby.create(g.account(), g.name(), true, "farmstead", true, g.conn())).startsWith("Create an account to play");
+        assertThat(lobby.roomCount()).isZero();
+
+        String code = create(client("Host"), false);
+        assertThat(lobby.join(g.account(), g.name(), true, code, g.conn())).isEqualTo(LobbyService.GUEST_ONLINE);
+
+        assertThat(lobby.create(g.account(), g.name(), true, "house", true, g.conn())).isNull();
+        assertThat(lobby.roomOf(g.account())).isPresent();
+    }
+
+    @Test
+    void accountsPlayAnyMapAnyWay() {
+        Client a = client("Account");
+        assertThat(lobby.create(a.account(), a.name(), false, "farmstead", false, a.conn())).isNull();
+        Client b = client("Friend");
+        assertThat(join(b, a.conn().last(ServerMessage.Welcome.class).room().code())).isNull();
+    }
+
+    @Test
     void unknownMapsAndCodesAreRejected() {
         Client a = client("A");
-        assertThat(lobby.create(a.account(), a.name(), "nowhere", false, a.conn())).contains("No map");
+        assertThat(lobby.create(a.account(), a.name(), false, "nowhere", false, a.conn())).contains("No map");
         assertThat(join(a, "ZZZZ")).contains("No room");
     }
 

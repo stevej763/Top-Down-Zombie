@@ -49,7 +49,8 @@ public class AdminController {
     public record GameDetail(GameRow game, long seed, List<GamePlayerRow> players) {}
 
     public record PlayerRow(UUID id, String name, Instant createdAt, Instant lastSeenAt, boolean online, String room,
-            long games, int bestRound, long kills, String lastIp, String platform, String device) {}
+            long games, int bestRound, long kills, String lastIp, String platform, String device, String email,
+            Instant accountAt) {}
 
     public record PlayerPage(long total, List<PlayerRow> players) {}
 
@@ -241,7 +242,7 @@ public class AdminController {
     private static final String PLAYER_SELECT = """
             SELECT p.id, p.name, p.created_at, p.last_seen_at, count(gp.game_id) AS games,
                    coalesce(max(g.round), 0) AS best, coalesce(sum(gp.kills), 0) AS kills, p.last_ip,
-                   d.platform, concat_ws(' · ', coalesce(d.model, d.os), d.browser)
+                   d.platform, concat_ws(' · ', coalesce(d.model, d.os), d.browser), p.email, p.account_at
             FROM players p LEFT JOIN LATERAL (SELECT * FROM player_devices WHERE player_id = p.id
                 ORDER BY last_seen_at DESC LIMIT 1) d ON true
             LEFT JOIN game_players gp ON gp.player_id = p.id LEFT JOIN games g ON g.id = gp.game_id
@@ -253,14 +254,15 @@ public class AdminController {
             @RequestParam(required = false) Integer offset) {
         auth.require(request);
         String pattern = q == null || q.isBlank() ? null : "%" + q.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
-        // Names, or an address the player has used.
+        // Names, emails, or an address the player has used.
         String where = pattern == null ? ""
-                : " WHERE (p.name ILIKE ? OR EXISTS (SELECT 1 FROM player_ips i WHERE i.player_id = p.id AND i.ip LIKE ?))";
+                : " WHERE (p.name ILIKE ? OR p.email ILIKE ? OR EXISTS (SELECT 1 FROM player_ips i WHERE i.player_id = p.id AND i.ip LIKE ?))";
         Map<UUID, String> rooms = roomByPlayer(live());
         Instant cutoff = clock.instant().minus(ONLINE);
         String order = PLAYER_SORTS.getOrDefault(sort == null ? "seen" : sort, PLAYER_SORTS.get("seen"));
         List<Object> params = new ArrayList<>();
         if (pattern != null) {
+            params.add(pattern);
             params.add(pattern);
             params.add(pattern);
         }
@@ -271,7 +273,7 @@ public class AdminController {
                 .query((rs, _) -> playerRow(rs, rooms, cutoff))
                 .list();
         long total = pattern == null ? count("SELECT count(*) FROM players", null)
-                : db.sql("SELECT count(*) FROM players p" + where).params(pattern, pattern).query(Long.class).single();
+                : db.sql("SELECT count(*) FROM players p" + where).params(pattern, pattern, pattern).query(Long.class).single();
         return new PlayerPage(total, rows);
     }
 
@@ -321,7 +323,7 @@ public class AdminController {
         String device = rs.getString(10);
         return new PlayerRow(id, rs.getString(2), instant(rs, 3), seen, room != null || (seen != null && seen.isAfter(cutoff)),
                 room, rs.getLong(5), rs.getInt(6), rs.getLong(7), rs.getString(8), rs.getString(9),
-                device == null || device.isEmpty() ? null : device);
+                device == null || device.isEmpty() ? null : device, rs.getString(11), instant(rs, 12));
     }
 
     // ------------------------------------------------------------- helpers

@@ -184,6 +184,10 @@ export interface PlayerRow {
   /** The most recently seen device: web | ios | android, and e.g. "macOS 15.1 · Chrome 131". */
   platform: string | null;
   device: string | null;
+  /** Null for guests. Not verified. */
+  email: string | null;
+  /** When they made an account (as a guest who signed up, or new). */
+  accountAt: string | null;
 }
 
 export interface PlayerDevice {
