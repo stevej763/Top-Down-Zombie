@@ -16,8 +16,10 @@
     "@capacitor/android": "^8.6.0",
     "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.6.0",
+    "@capacitor/device": "^8.0.3",
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/ios": "^8.6.0",
+    "@capacitor/network": "^8.0.1",
     "@capacitor/status-bar": "^8.0.4"
   },
   "devDependencies": {
