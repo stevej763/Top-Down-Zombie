@@ -1,9 +1,9 @@
 import { changePassword, login, logout, me, setUnauthorizedHandler, type Admin } from './api';
 import { adminsPage } from './adminsPage';
 import { h, modal, toast } from './dom';
-import { setEditorActive } from './editorPage';
 import { gamesPage } from './gamesPage';
 import { livePage } from './livePage';
+import { mapsPage } from './mapsPage';
 import { playersPage } from './playersPage';
 
 /** One tab of the portal. `show` runs after its element is visible; `hide` stops its polling and loops. */
@@ -17,7 +17,7 @@ const PAGES: Record<string, Page> = {
   games: gamesPage,
   players: playersPage,
   admins: adminsPage,
-  maps: { show: () => setEditorActive(true), hide: () => setEditorActive(false) },
+  maps: mapsPage,
 };
 const DEFAULT_PAGE = 'live';
 
@@ -27,16 +27,21 @@ const meEl = document.getElementById('me')!;
 let current: string | null = null;
 let admin: Admin | null = null;
 
-/** `#players/<id>` opens a player; `#games/<id>` a game. */
+/**
+ * `#players/<id>` opens a player; `#games/<id>` a game; `#maps/edit/<id>` the editor. Everything after
+ * the first slash is the page's argument; a `?query` is left for the page to read.
+ */
 function route(): void {
   if (!admin) return;
-  const [name, arg] = location.hash.slice(1).split('/');
+  const path = location.hash.slice(1).split('?')[0];
+  const slash = path.indexOf('/');
+  const name = slash < 0 ? path : path.slice(0, slash);
+  const arg = slash < 0 ? '' : path.slice(slash + 1);
   const page = PAGES[name] ? name : DEFAULT_PAGE;
   if (current && current !== page) PAGES[current].hide();
   for (const p of Object.keys(PAGES)) document.getElementById(`page-${p}`)!.hidden = p !== page;
-  document.getElementById('maps-actions')!.hidden = page !== 'maps';
   document.querySelectorAll<HTMLAnchorElement>('#tabs a').forEach((a) => a.classList.toggle('on', a.hash === `#${page}`));
-  if (page !== 'maps') document.title = `${page[0].toUpperCase()}${page.slice(1)} · Top Down Survival admin`;
+  document.title = `${page[0].toUpperCase()}${page.slice(1)} · Top Down Survival admin`;
   current = page;
   PAGES[page].show(arg ? decodeURIComponent(arg) : undefined);
 }

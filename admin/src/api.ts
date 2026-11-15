@@ -229,6 +229,28 @@ export interface PlayerGame {
   leftAt: string | null;
 }
 
+/** A map and how it's been played. The averages count only games played to a game over. */
+export interface MapStats {
+  id: string;
+  name: string;
+  version: number;
+  width: number;
+  height: number;
+  updatedAt: string;
+  games: number;
+  gamesToday: number;
+  players: number;
+  bestRound: number | null;
+  /** Who holds the map's top score. */
+  bestBy: string | null;
+  avgRound: number | null;
+  kills: number;
+  avgLengthMs: number | null;
+  lastPlayedAt: string | null;
+  playingNow: number;
+  inLobby: number;
+}
+
 const query = (q: Record<string, string | number | undefined>) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '') p.set(k, String(v));
@@ -243,6 +265,7 @@ export const games = (q: { limit?: number; before?: string; map?: string; reason
 export const game = (id: string) => json<GameDetail>('GET', `/api/admin/games/${id}`);
 export const players = (q: { q?: string; sort?: string; limit?: number; offset?: number }) =>
   json<{ total: number; players: PlayerRow[] }>('GET', `/api/admin/players${query(q)}`);
+export const mapStats = () => json<MapStats[]>('GET', '/api/admin/maps');
 export const player = (id: string) => json<PlayerDetail>('GET', `/api/admin/players/${id}`);
 
 /** The spectator socket for a room (same-origin; the session cookie authenticates it). */
