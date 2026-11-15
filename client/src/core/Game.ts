@@ -1,16 +1,14 @@
 import { sound } from '../audio/Sound';
-import { loadIdentity, type MapSummary } from '../net/api';
+import { loadIdentity, startHeartbeat, type MapSummary } from '../net/api';
 import type { Link } from '../net/Connection';
 import { NetGame } from '../net/NetGame';
 import type { GameResult, LobbyPlayer, NetEvent, ServerMessage } from '../net/protocol';
-import {
-  doorSide, doorSwingAt, drawCrosshair, drawInteractable, drawInteractableOverlay, drawLamps, drawPlayer,
-  drawPlayerOverlay, drawPowerUps, drawWindow, drawZombie, renderMap, type DoorSwing,
-} from '../render/draw';
+import { doorSide, doorSwingAt, drawCrosshair, renderMap, type DoorSwing } from '../render/draw';
 import { Lighting } from '../render/lighting';
 import {
   AKIMBO_OFFSET, PERK_VISUALS, POWERUP_VISUALS, TIER_HALO, WEAPON_FX, type PlayerFx, type ZombieFx,
 } from '../render/visuals';
+import { drawWorld } from '../render/world';
 import { isAkimbo, KNIFE, PERKS, PLAYER_RADIUS, POWERUPS, WEAPONS, weaponName } from '../game/defs';
 import { NO_INPUT, type PlayerInput } from '../game/input';
 import type { MapDoc } from '../game/MapData';
@@ -255,6 +253,7 @@ export class Game {
   }
 
   start(): void {
+    startHeartbeat();
     requestAnimationFrame((t) => {
       this.last = t;
       requestAnimationFrame(this.frame);
@@ -783,33 +782,16 @@ export class Game {
 
     const cx = Math.round(this.camera.x + this.camera.ox);
     const cy = Math.round(this.camera.y + this.camera.oy);
-
-    ctx.save();
-    ctx.translate(-cx, -cy);
-    ctx.drawImage(this.mapCanvas, 0, 0);
-    this.particles.drawDecals(ctx);
-    const light = this.roomLight();
-    drawLamps(ctx, level.lights, 0);
-    level.fixtures.forEach((f, i) => drawInteractable(ctx, f, world.interactables[i], this.time, world.power, this.doorSwing(i)));
-    level.windows.forEach((w, i) => drawWindow(ctx, w, world.windows[i]));
-    for (const z of world.zombies) drawZombie(ctx, z, this.fxOf(z.id), world.round.n);
-    // The local player on top of teammates.
-    const players = [...world.players].sort((a, b) => Number(a.id === this.you) - Number(b.id === this.you));
-    for (const p of players) drawPlayer(ctx, p, this.playerFxOf(p.id), p.id === this.you);
-    this.particles.draw(ctx);
-    ctx.restore();
-
-    this.lighting.draw(ctx, level, world, (id) => this.playerFxOf(id), cx, cy, light);
-
-    ctx.save();
-    ctx.translate(-cx, -cy);
-    if (light > 0) drawLamps(ctx, level.lights, light);
-    this.particles.drawGlow(ctx);
-    drawPowerUps(ctx, world.powerUps.drops, this.time);
-    level.fixtures.forEach((f, i) => drawInteractableOverlay(ctx, f, world.interactables[i], this.time));
-    for (const p of players) drawPlayerOverlay(ctx, p, p.id === this.you, this.time);
-    this.particles.drawTexts(ctx);
-    ctx.restore();
+    drawWorld(ctx, level, world, this.mapCanvas, cx, cy, {
+      time: this.time,
+      you: this.you,
+      light: this.roomLight(),
+      playerFx: (id) => this.playerFxOf(id),
+      zombieFx: (id) => this.fxOf(id),
+      doorSwing: (i) => this.doorSwing(i),
+      particles: this.particles,
+      lighting: this.lighting,
+    });
 
     if (this.screenFlash > 0) {
       ctx.fillStyle = `rgba(255, 245, 220, ${this.screenFlash * 0.8})`;

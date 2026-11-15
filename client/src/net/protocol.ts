@@ -64,6 +64,16 @@ export type ServerMessage =
   | { type: 'pong'; t: number }
   | { type: 'error'; message: string };
 
+/** Admin spectators only (`/ws/watch`): sent instead of `welcome`, then everything players are sent. */
+export interface WatchMessage {
+  type: 'watch';
+  room: { code: string; mapId: string; mapVersion: number; solo: boolean };
+  map: MapDoc;
+  lobby: Extract<ServerMessage, { type: 'lobby' }>;
+}
+
+export type SpectatorMessage = ServerMessage | WatchMessage;
+
 // ----------------------------------------------------------------- snapshot (20 Hz)
 
 /** The world fields are `WorldView` (view/WorldView.ts), so a snapshot can be rendered as is. Floats are rounded to 2 decimals. */

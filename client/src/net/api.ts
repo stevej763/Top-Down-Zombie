@@ -127,3 +127,24 @@ export function fetchMap(id: string): Promise<MapDoc> {
 export function fetchScores(mapId: string, limit: number): Promise<ServerScore[]> {
   return request<ServerScore[]>('GET', `/scores?map=${encodeURIComponent(mapId)}&limit=${limit}`);
 }
+
+const HEARTBEAT_MS = 30_000;
+
+/**
+ * Tells the server the app is open, every 30 s while the page is visible, so the admin portal can
+ * show who's online. Only once the player has registered (named themselves); failures are ignored.
+ */
+export function startHeartbeat(): void {
+  const beat = (): void => {
+    const token = loadIdentity()?.token;
+    if (!token || document.visibilityState !== 'visible') return;
+    fetch(apiUrl('/players/me/seen'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch(() => {});
+  };
+  beat();
+  setInterval(beat, HEARTBEAT_MS);
+  document.addEventListener('visibilitychange', beat);
+}
