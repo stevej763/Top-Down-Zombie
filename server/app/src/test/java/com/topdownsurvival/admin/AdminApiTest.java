@@ -190,6 +190,15 @@ class AdminApiTest {
         assertThat(page.get("total").asInt()).isPositive();
         assertThat(get("/api/admin/players?q=Gadget", root).body().get("players").get(0).get("platform").asString())
                 .isEqualTo("web");
+
+        // Players from before addresses were recorded have none of it.
+        JsonNode old = register("Oldtimer");
+        db.sql("UPDATE players SET created_ip = NULL, last_ip = NULL WHERE id = ?").param(UUID.fromString(old.get("playerId").asString())).update();
+        db.sql("DELETE FROM player_ips WHERE player_id = ?").param(UUID.fromString(old.get("playerId").asString())).update();
+        Res r = get("/api/admin/players/" + old.get("playerId").asString(), root);
+        assertThat(r.status()).isEqualTo(200);
+        assertThat(r.body().get("createdIp").isNull()).isTrue();
+        assertThat(r.body().get("devices")).isEmpty();
     }
 
     private boolean onlineFlag(String cookie, String name) throws Exception {
