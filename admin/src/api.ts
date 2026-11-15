@@ -180,6 +180,39 @@ export interface PlayerRow {
   games: number;
   bestRound: number;
   kills: number;
+  lastIp: string | null;
+  /** The most recently seen device: web | ios | android, and e.g. "macOS 15.1 · Chrome 131". */
+  platform: string | null;
+  device: string | null;
+}
+
+export interface PlayerDevice {
+  deviceId: string;
+  platform: string;
+  os: string | null;
+  browser: string | null;
+  model: string | null;
+  userAgent: string | null;
+  ip: string | null;
+  details: Record<string, string | number | boolean | null>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface PlayerIp {
+  ip: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Other players seen at this address. */
+  otherPlayers: number;
+}
+
+export interface PlayerDetail {
+  player: PlayerRow;
+  createdIp: string | null;
+  devices: PlayerDevice[];
+  ips: PlayerIp[];
+  games: PlayerGame[];
 }
 
 export interface PlayerGame {
@@ -210,7 +243,7 @@ export const games = (q: { limit?: number; before?: string; map?: string; reason
 export const game = (id: string) => json<GameDetail>('GET', `/api/admin/games/${id}`);
 export const players = (q: { q?: string; sort?: string; limit?: number; offset?: number }) =>
   json<{ total: number; players: PlayerRow[] }>('GET', `/api/admin/players${query(q)}`);
-export const player = (id: string) => json<{ player: PlayerRow; games: PlayerGame[] }>('GET', `/api/admin/players/${id}`);
+export const player = (id: string) => json<PlayerDetail>('GET', `/api/admin/players/${id}`);
 
 /** The spectator socket for a room (same-origin; the session cookie authenticates it). */
 export function watchSocket(code: string): WebSocket {
