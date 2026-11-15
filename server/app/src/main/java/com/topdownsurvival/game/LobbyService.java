@@ -4,7 +4,9 @@ import com.topdownsurvival.game.protocol.ServerMessage;
 import com.topdownsurvival.map.MapService;
 import com.topdownsurvival.sim.map.MapDoc;
 import java.security.SecureRandom;
+import jakarta.annotation.PreDestroy;
 import java.time.InstantSource;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -38,6 +40,7 @@ public class LobbyService implements GameRoom.Listener {
 
     private final Function<String, Optional<RoomMap>> maps;
     private final ScoreRecorder scores;
+    private final GameRecorder history;
     private final Executor background;
     private final Ticker ticker;
     private final InstantSource clock;
@@ -49,15 +52,16 @@ public class LobbyService implements GameRoom.Listener {
     private final Map<GameRoom, Runnable> stoppers = new ConcurrentHashMap<>();
 
     @Autowired
-    public LobbyService(MapService maps, ScoreRecorder scores, Ticker ticker, InstantSource clock) {
-        this(id -> maps.find(id).map(m -> new RoomMap(maps.parse(m.getData()), m.getVersion())), scores,
+    public LobbyService(MapService maps, ScoreRecorder scores, GameRecorder history, Ticker ticker, InstantSource clock) {
+        this(id -> maps.find(id).map(m -> new RoomMap(maps.parse(m.getData()), m.getVersion())), scores, history,
                 Executors.newVirtualThreadPerTaskExecutor(), ticker, clock, null);
     }
 
-    LobbyService(Function<String, Optional<RoomMap>> maps, ScoreRecorder scores, Executor background, Ticker ticker,
-            InstantSource clock, LongSupplier seeds) {
+    LobbyService(Function<String, Optional<RoomMap>> maps, ScoreRecorder scores, GameRecorder history, Executor background,
+            Ticker ticker, InstantSource clock, LongSupplier seeds) {
         this.maps = maps;
         this.scores = scores;
+        this.history = history;
         this.background = background;
         this.ticker = ticker;
         this.clock = clock;
@@ -69,7 +73,7 @@ public class LobbyService implements GameRoom.Listener {
         Optional<RoomMap> map = mapId == null ? Optional.empty() : maps.apply(mapId);
         if (map.isEmpty()) return "No map " + mapId;
         leave(account);
-        GameRoom room = new GameRoom(newCode(), map.get().doc(), map.get().version(), solo, scores, background, clock, seeds, this);
+        GameRoom room = new GameRoom(newCode(), map.get().doc(), map.get().version(), solo, scores, history, background, clock, seeds, this);
         rooms.put(room.code, room);
         stoppers.put(room, ticker.start(room::tick));
         room.join(account, name, conn);
@@ -118,6 +122,17 @@ public class LobbyService implements GameRoom.Listener {
 
     public int roomCount() {
         return rooms.size();
+    }
+
+    /** Every live room, in no particular order. */
+    public List<GameRoom> rooms() {
+        return List.copyOf(rooms.values());
+    }
+
+    /** Records games still running as cut short, so history doesn't show them running forever. */
+    @PreDestroy
+    public void shutdown() {
+        for (GameRoom room : rooms.values()) room.shutdown();
     }
 
     @Override

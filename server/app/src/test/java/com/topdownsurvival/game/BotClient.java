@@ -38,8 +38,20 @@ final class BotClient extends TextWebSocketHandler {
         this.session = new StandardWebSocketClient().execute(this, url).get(10, TimeUnit.SECONDS);
     }
 
+    private BotClient(String url, org.springframework.web.socket.WebSocketHttpHeaders headers) throws Exception {
+        this.session = new StandardWebSocketClient().execute(this, headers, java.net.URI.create(url)).get(10, TimeUnit.SECONDS);
+    }
+
     static BotClient connect(int port, String token) throws Exception {
         return new BotClient("ws://localhost:" + port + "/ws?token=" + token);
+    }
+
+    /** An admin watching a room; {@code cookie} is a whole Cookie header and {@code origin} may be null. */
+    static BotClient watch(int port, String code, String cookie, String origin) throws Exception {
+        var headers = new org.springframework.web.socket.WebSocketHttpHeaders();
+        if (cookie != null) headers.add("Cookie", cookie);
+        if (origin != null) headers.add("Origin", origin);
+        return new BotClient("ws://localhost:" + port + "/ws/watch?code=" + code, headers);
     }
 
     @Override

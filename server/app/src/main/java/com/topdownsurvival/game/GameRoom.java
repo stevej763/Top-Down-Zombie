@@ -15,7 +15,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -28,7 +30,8 @@ import org.slf4j.LoggerFactory;
  * One game: its members, lobby state and (while playing) the {@link GameSim}. {@link #tick} is
  * called 60 times a second by one scheduled task, and it and every membership change hold this
  * room's lock, so the sim only ever sees one thread. Socket threads only enqueue inputs, lock-free.
- * Back in the lobby after a game over, the same members can start again.
+ * Back in the lobby after a game over, the same members can start again. Admins can watch as
+ * spectators: they get everything broadcast, but players are never told they're there.
  */
 public final class GameRoom {
     public enum State { LOBBY, PLAYING }
@@ -84,13 +87,16 @@ public final class GameRoom {
     public final boolean solo;
     private final MapDoc map;
     private final ScoreRecorder scores;
-    /** Runs score writes, so a slow database never holds up the tick. */
+    private final GameRecorder history;
+    /** Runs score and history writes, so a slow database never holds up the tick. */
     private final Executor background;
     private final InstantSource clock;
     private final LongSupplier seeds;
     private final Listener listener;
 
     private final Map<UUID, Member> members = new ConcurrentHashMap<>();
+    /** Admin watchers. Kept apart from members, so nothing players see counts or lists them. */
+    private final Set<Connection> spectators = ConcurrentHashMap.newKeySet();
     private volatile State state = State.LOBBY;
     private int lastMemberId;
     private int ownerId;
@@ -102,6 +108,11 @@ public final class GameRoom {
     private boolean paused;
     /** Set from game over until the results go out; the sim is frozen meanwhile. */
     private Finishing finishing;
+    /** The game in progress (or last played), for history. */
+    private UUID gameId;
+    private Instant startedAt;
+    /** Score and history writes, chained so they reach the database in the order they happened. */
+    private CompletableFuture<Void> writes = CompletableFuture.completedFuture(null);
 
     /** A finished game waiting for its scores; {@code ranks} is set from the background thread. */
     private static final class Finishing {
@@ -117,14 +128,15 @@ public final class GameRoom {
         }
     }
 
-    public GameRoom(String code, MapDoc map, int mapVersion, boolean solo, ScoreRecorder scores, Executor background,
-            InstantSource clock, LongSupplier seeds, Listener listener) {
+    public GameRoom(String code, MapDoc map, int mapVersion, boolean solo, ScoreRecorder scores, GameRecorder history,
+            Executor background, InstantSource clock, LongSupplier seeds, Listener listener) {
         this.code = code;
         this.mapId = map.id();
         this.map = map;
         this.mapVersion = mapVersion;
         this.solo = solo;
         this.scores = scores;
+        this.history = history;
         this.background = background;
         this.clock = clock;
         this.seeds = seeds;
@@ -205,13 +217,20 @@ public final class GameRoom {
         if (state != State.LOBBY) return "The game has already started";
         for (Member o : members.values()) if (o != m && !o.ready) return o.name + " isn't ready";
 
-        sim = new GameSim(map, seeds.getAsLong());
+        long seed = seeds.getAsLong();
+        sim = new GameSim(map, seed);
+        List<GameRecorder.Seat> seats = new ArrayList<>();
         for (Member o : ordered()) {
             sim.addPlayer(o.id, o.name);
             clearInputs(o);
             o.last = PlayerInput.NONE;
             o.lastSeq = 0;
+            seats.add(new GameRecorder.Seat(o.account, o.id, o.name));
         }
+        gameId = UUID.randomUUID();
+        startedAt = clock.instant();
+        var game = new GameRecorder.GameStart(gameId, code, mapId, mapVersion, solo, seed, startedAt, List.copyOf(seats));
+        write("game start", () -> history.started(game));
         partySize = members.size();
         tick = 0;
         paused = false;
@@ -247,10 +266,21 @@ public final class GameRoom {
 
     private void remove(Member m) {
         members.remove(m.account);
-        if (sim != null && sim.player(m.id) != null) sim.removePlayer(m.id);
+        Player p = sim != null ? sim.player(m.id) : null;
+        if (p != null) {
+            if (finishing == null) {
+                UUID game = gameId;
+                var standing = new GameRecorder.Standing(m.account, p.kills, p.economy.earned);
+                Instant at = clock.instant();
+                write("player leaving", () -> history.left(game, standing, at));
+            }
+            sim.removePlayer(m.id);
+        }
         listener.memberRemoved(this, m.account);
         if (m.id == ownerId) ownerId = ordered().stream().mapToInt(o -> o.id).findFirst().orElse(0);
         if (members.isEmpty()) {
+            // Everyone left mid-game: it never reached game over, so no scores, but history keeps it.
+            if (state == State.PLAYING && finishing == null) recordEnd("abandoned");
             close();
         } else {
             broadcast(lobby());
@@ -261,7 +291,15 @@ public final class GameRoom {
         if (closed) return;
         closed = true;
         sim = null;
+        for (Connection s : spectators) s.close();
+        spectators.clear();
         listener.closed(this);
+    }
+
+    /** The server is stopping: a game still running is recorded as cut short. Waits for the writes. */
+    public synchronized void shutdown() {
+        if (state == State.PLAYING && finishing == null && sim != null) recordEnd("shutdown");
+        writes.exceptionally(_ -> null).join();
     }
 
     // --------------------------------------------------------------- tick
@@ -285,6 +323,11 @@ public final class GameRoom {
             // A sim bug shouldn't kill the room's task (which would freeze it for good): end the game instead.
             log.error("Room {}: sim failed at tick {}", code, tick, e);
             broadcast(new ServerMessage.Error("The game crashed"));
+            try {
+                recordEnd("crashed");
+            } catch (RuntimeException e2) {
+                log.error("Room {}: couldn't record the crash", code, e2);
+            }
             backToLobby();
         }
     }
@@ -344,19 +387,42 @@ public final class GameRoom {
         List<ScoreRecorder.Result> results = new ArrayList<>();
         for (Player p : players) results.add(new ScoreRecorder.Result(accountOf(p.id), p.kills, p.economy.earned));
         Finishing f = new Finishing(round, players, clock.instant().plus(SCORE_WAIT));
-        finishing = f;
         int party = partySize;
-        background.execute(() -> {
+        UUID game = gameId;
+        write("scores", () -> {
             List<Integer> ranks;
             try {
-                ranks = scores.record(mapId, round, party, results);
+                ranks = scores.record(game, mapId, round, party, results);
             } catch (RuntimeException e) {
                 log.error("Room {}: couldn't save scores", code, e);
                 ranks = players.stream().map(_ -> -1).toList();
             }
             f.ranks = ranks;
         });
+        recordEnd("over");
+        finishing = f;
         if (f.ranks != null) showResults(); // the executor ran it inline
+    }
+
+    /** Writes the end of the current game to history, with the standings of everyone still in it. */
+    private void recordEnd(String reason) {
+        UUID game = gameId;
+        int round = Math.max(0, sim.rounds.round - 1);
+        Instant at = clock.instant();
+        List<GameRecorder.Standing> standings = sim.players.stream()
+                .map(p -> new GameRecorder.Standing(accountOf(p.id), p.kills, p.economy.earned)).toList();
+        write("game end", () -> history.ended(game, reason, round, at, standings));
+    }
+
+    /** Runs a database write on the background executor, after the room's earlier writes. */
+    private void write(String what, Runnable task) {
+        writes = writes.thenRunAsync(() -> {
+            try {
+                task.run();
+            } catch (RuntimeException e) {
+                log.error("Room {}: couldn't save {}", code, what, e);
+            }
+        }, background);
     }
 
     /** The gameOver message, then back to the lobby. Ranks still unsaved show as -1. */
@@ -398,6 +464,51 @@ public final class GameRoom {
 
     private void broadcast(ServerMessage msg) {
         for (Member m : members.values()) if (m.conn != null) m.conn.send(msg);
+        for (Connection s : spectators) s.send(msg);
+    }
+
+    // --------------------------------------------------------------- admin
+
+    /**
+     * Adds an admin watcher. They get the map and the members, then a full snapshot if a game is
+     * running, then whatever the players get. Returns an error message, or null.
+     */
+    public synchronized String watch(Connection conn) {
+        if (closed) return "No room " + code;
+        spectators.add(conn);
+        conn.send(new ServerMessage.Watch(new ServerMessage.RoomInfo(code, mapId, mapVersion, solo), map, lobby()));
+        if (state == State.PLAYING && sim != null) conn.send(SnapshotBuilder.build(sim, tick, acks()));
+        return null;
+    }
+
+    public void unwatch(Connection conn) {
+        spectators.remove(conn);
+    }
+
+    public record LiveMember(int id, UUID playerId, String name, boolean connected, boolean ready, boolean owner,
+            String state, int points, int kills) {}
+
+    public record LiveRoom(String code, String mapId, boolean solo, String state, UUID gameId, Instant startedAt,
+            long tick, int round, int zombies, boolean power, boolean paused, int spectators, List<LiveMember> members) {}
+
+    /** What the admin portal's live page shows. */
+    public synchronized LiveRoom summary() {
+        boolean playing = state == State.PLAYING && sim != null;
+        var list = ordered().stream().map(m -> {
+            Player p = playing ? sim.player(m.id) : null;
+            return new LiveMember(m.id, m.account, m.name, m.conn != null, m.ready, m.id == ownerId,
+                    p == null ? null : p.state.name().toLowerCase(Locale.ROOT), p == null ? 0 : p.economy.earned,
+                    p == null ? 0 : p.kills);
+        }).toList();
+        return new LiveRoom(code, mapId, solo, state.name().toLowerCase(Locale.ROOT), playing ? gameId : null,
+                playing ? startedAt : null, playing ? tick : 0, playing ? sim.rounds.round : 0,
+                playing ? sim.zombies.size() : 0, playing && sim.power, paused, spectators.size(), list);
+    }
+
+    private Map<Integer, Integer> acks() {
+        Map<Integer, Integer> acks = new HashMap<>();
+        for (Member m : members.values()) if (sim.player(m.id) != null) acks.put(m.id, m.lastSeq);
+        return acks;
     }
 
     private ServerMessage.Welcome welcome(Member m) {

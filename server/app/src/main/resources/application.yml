@@ -25,8 +25,10 @@ top-down-survival:
   # Origins allowed to call the API directly. The Vite dev server proxies /api, so this is only
   # needed when the client is served from somewhere else.
   cors-origins: ${CORS_ORIGINS:http://localhost:5173}
-  # Enables PUT /api/maps/{id} (X-Admin-Token header). Empty disables map uploads.
-  admin-token: ${ADMIN_TOKEN:}
+  # The first admin portal account, created at startup while there are none.
+  admin:
+    username: ${ADMIN_USERNAME:}
+    password: ${ADMIN_PASSWORD:}
   debug:
     # Dev only: delays every /ws message by this much in each direction, to try client prediction.
     latency-ms: ${DEBUG_LATENCY_MS:0}

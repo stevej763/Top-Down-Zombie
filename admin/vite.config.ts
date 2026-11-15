@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from 'vite';
 
 const mapsDir = join(dirname(fileURLToPath(import.meta.url)), '../maps');
 const ID = /^[a-z0-9-]{1,40}$/;
+const API_TARGET = process.env.API_TARGET ?? 'http://localhost:8080';
 
 /**
  * Dev server only: `PUT /__repo/maps/<id>` writes the body to maps/<id>.json, so a map designed here
@@ -48,7 +49,11 @@ export default defineConfig({
     open: false,
     // The editor reuses the game's map types and drawing from ../client/src (and ../shared/defs).
     fs: { allow: ['..'] },
-    // A local bootRun by default; API_TARGET=http://localhost:8551 uses the compose stack instead.
-    proxy: { '/api': process.env.API_TARGET ?? 'http://localhost:8080' },
+    // A local bootRun by default; API_TARGET=http://localhost:8552 uses the compose stack's admin
+    // proxy instead (the game's :8551 refuses admin routes).
+    proxy: {
+      '/api': API_TARGET,
+      '/ws/watch': { target: API_TARGET, ws: true },
+    },
   },
 });

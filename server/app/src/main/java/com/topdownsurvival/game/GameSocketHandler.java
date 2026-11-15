@@ -2,6 +2,7 @@ package com.topdownsurvival.game;
 
 import com.topdownsurvival.game.protocol.ClientMessage;
 import com.topdownsurvival.game.protocol.ServerMessage;
+import com.topdownsurvival.player.PlayerActivity;
 import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
@@ -27,7 +28,10 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
 
-/** {@code /ws}: parses client messages and routes them to the {@link LobbyService} and rooms. */
+/**
+ * {@code /ws}: parses client messages and routes them to the {@link LobbyService} and rooms. Also
+ * serves {@code /ws/watch}, where an admin spectates one room: those sockets only receive (and ping).
+ */
 @Component
 public class GameSocketHandler extends TextWebSocketHandler implements DisposableBean {
     private static final Logger log = LoggerFactory.getLogger(GameSocketHandler.class);
@@ -40,17 +44,21 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
     private static final int BUFFER_LIMIT_CHARS = 512 * 1024;
 
     private final LobbyService lobby;
+    private final PlayerActivity activity;
     private final JsonMapper json;
     private final ObjectWriter writer;
     private final long latencyMs;
     /** Only when simulating latency; one thread, so delayed messages keep their order. */
     private final ScheduledExecutorService delayer;
     private final Map<String, SocketConnection> connections = new ConcurrentHashMap<>();
+    private final Map<String, SocketConnection> watchers = new ConcurrentHashMap<>();
     /** Drains outboxes and closes sockets; a blocked send parks only its own virtual thread. */
     private final ExecutorService senders = Executors.newVirtualThreadPerTaskExecutor();
 
-    public GameSocketHandler(LobbyService lobby, JsonMapper json, @Value("${top-down-survival.debug.latency-ms:0}") long latencyMs) {
+    public GameSocketHandler(LobbyService lobby, PlayerActivity activity, JsonMapper json,
+            @Value("${top-down-survival.debug.latency-ms:0}") long latencyMs) {
         this.lobby = lobby;
+        this.activity = activity;
         this.json = json;
         this.writer = json.writerFor(ServerMessage.class);
         this.latencyMs = latencyMs;
@@ -61,12 +69,26 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         var conn = new SocketConnection(session);
+        String watching = watching(session);
+        if (watching != null) {
+            // No inbound delay: the debug latency is for trying out prediction, which watchers don't do.
+            // Left open after an error (closing would drop the message unsent); the portal closes it.
+            watchers.put(session.getId(), conn);
+            GameRoom room = lobby.room(watching).orElse(null);
+            LobbyService.reply(conn, room == null ? "No room " + watching : room.watch(conn));
+            return;
+        }
         connections.put(session.getId(), conn);
+        activity.seenLater(account(session));
         inbound(() -> lobby.connected(account(session), conn));
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+        if (watching(session) != null) {
+            pingFromWatcher(session, message.getPayload());
+            return;
+        }
         SocketConnection conn = connections.get(session.getId());
         if (conn == null) return;
         String payload = message.getPayload();
@@ -75,8 +97,33 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        String watching = watching(session);
+        if (watching != null) {
+            SocketConnection conn = watchers.remove(session.getId());
+            if (conn != null) lobby.room(watching).ifPresent(r -> r.unwatch(conn));
+            return;
+        }
         SocketConnection conn = connections.remove(session.getId());
-        if (conn != null) inbound(() -> lobby.disconnected(account(session), conn));
+        if (conn != null) {
+            activity.seenLater(account(session));
+            inbound(() -> lobby.disconnected(account(session), conn));
+        }
+    }
+
+    /** Watchers may only ping; anything else is ignored rather than answered, so they stay passive. */
+    private void pingFromWatcher(WebSocketSession session, String payload) {
+        SocketConnection conn = watchers.get(session.getId());
+        if (conn == null) return;
+        try {
+            if (json.readValue(payload, ClientMessage.class) instanceof ClientMessage.Ping p) conn.send(new ServerMessage.Pong(p.t()));
+        } catch (JacksonException e) {
+            // Ignored.
+        }
+    }
+
+    /** Open game sockets (watchers not included). */
+    public int connectionCount() {
+        return connections.size();
     }
 
     private void handle(UUID account, String name, SocketConnection conn, String payload) {
@@ -120,6 +167,11 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
     private void inbound(Runnable r) {
         if (delayer == null) r.run();
         else delayer.schedule(r, latencyMs, TimeUnit.MILLISECONDS);
+    }
+
+    /** The room code an admin is watching, or null for a player's socket. */
+    private static String watching(WebSocketSession s) {
+        return (String) s.getAttributes().get(WatchHandshakeInterceptor.ROOM);
     }
 
     private static UUID account(WebSocketSession s) {

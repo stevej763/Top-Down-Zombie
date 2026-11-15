@@ -62,7 +62,7 @@ class ApiIntegrationTest {
 
     /** Scores are written by game rooms now, so tests store them directly. */
     private void score(NewPlayer p, String map, int round, int kills, int points) {
-        scores.save(new Score(players.getReferenceById(p.id()), map, round, kills, points, 1));
+        scores.save(new Score(players.getReferenceById(p.id()), null, map, round, kills, points, 1));
     }
 
     @Test

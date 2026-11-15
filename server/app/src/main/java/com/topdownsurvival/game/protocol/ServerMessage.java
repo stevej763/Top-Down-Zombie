@@ -42,6 +42,10 @@ public interface ServerMessage {
     @JsonTypeName("gameOver")
     record GameOver(int round, List<Result> players) implements ServerMessage {}
 
+    /** Admin spectators only: sent instead of welcome when they start watching a room. */
+    @JsonTypeName("watch")
+    record Watch(RoomInfo room, MapDoc map, Lobby lobby) implements ServerMessage {}
+
     @JsonTypeName("pong")
     record Pong(double t) implements ServerMessage {}
 

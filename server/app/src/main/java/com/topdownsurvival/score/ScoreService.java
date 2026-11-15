@@ -4,6 +4,7 @@ import com.topdownsurvival.game.ScoreRecorder;
 import com.topdownsurvival.player.PlayerRepository;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,10 +21,10 @@ public class ScoreService implements ScoreRecorder {
 
     @Override
     @Transactional
-    public List<Integer> record(String mapId, int round, int partySize, List<Result> results) {
+    public List<Integer> record(UUID gameId, String mapId, int round, int partySize, List<Result> results) {
         List<Score> saved = new ArrayList<>();
         for (Result r : results) {
-            saved.add(scores.save(new Score(players.getReferenceById(r.playerId()), mapId, round, r.kills(), r.points(), partySize)));
+            saved.add(scores.save(new Score(players.getReferenceById(r.playerId()), gameId, mapId, round, r.kills(), r.points(), partySize)));
         }
         scores.flush();
         return saved.stream().map(s -> (int) scores.countAhead(mapId, s.getRound(), s.getKills(), s.getPoints(), s.getId())).toList();
