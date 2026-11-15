@@ -49,9 +49,12 @@ class LoadTrialIT {
         for (int r = 0; r < ROOMS; r++) {
             List<BotClient> room = new ArrayList<>();
             for (int i = 0; i < PER_ROOM; i++) {
-                var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/players"))
+                // Accounts: guests can't host co-op.
+                String body = "{\"email\":\"bot-" + r + "-" + i + "@example.com\",\"username\":\"Bot " + r + "-" + i
+                        + "\",\"password\":\"password1\"}";
+                var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/players/register"))
                         .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString("{\"name\":\"Bot " + r + "-" + i + "\"}")).build();
+                        .POST(HttpRequest.BodyPublishers.ofString(body)).build();
                 String token = json.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body()).get("token").asString();
                 room.add(BotClient.connect(port, token));
             }

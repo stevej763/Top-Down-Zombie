@@ -5,6 +5,8 @@ import com.topdownsurvival.sim.map.MapDoc;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,19 +22,26 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/maps")
 public class MapController {
-    public record MapSummary(String id, String name, int version) {}
+    /** {@code guest}: guests may play it (solo); other maps need an account. */
+    public record MapSummary(String id, String name, int version, boolean guest) {}
 
     private final MapService maps;
     private final AdminAuth admins;
+    private final Set<String> guestMaps;
 
-    public MapController(MapService maps, AdminAuth admins) {
+    public MapController(MapService maps, AdminAuth admins, @Value("${top-down-survival.guest-maps:house}") Set<String> guestMaps) {
         this.maps = maps;
         this.admins = admins;
+        this.guestMaps = Set.copyOf(guestMaps);
     }
 
     @GetMapping
     public List<MapSummary> list() {
-        return maps.published().stream().map(m -> new MapSummary(m.getId(), m.getName(), m.getVersion())).toList();
+        return maps.published().stream().map(this::summary).toList();
+    }
+
+    private MapSummary summary(GameMap m) {
+        return new MapSummary(m.getId(), m.getName(), m.getVersion(), guestMaps.contains(m.getId()));
     }
 
     /** The map document itself, as stored. */
@@ -51,7 +60,7 @@ public class MapController {
         if (!id.equals(doc.id())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL id and document id differ");
         GameMap saved = maps.save(doc);
         GameMap current = saved != null ? saved : maps.find(id).orElseThrow();
-        return new MapSummary(current.getId(), current.getName(), current.getVersion());
+        return summary(current);
     }
 
     @ExceptionHandler(MapService.InvalidMapException.class)

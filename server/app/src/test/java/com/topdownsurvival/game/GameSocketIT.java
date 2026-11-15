@@ -8,6 +8,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -54,12 +55,23 @@ class GameSocketIT {
         return json.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body());
     }
 
+    /** A guest: solo on the house only. */
+    private Account guest(String name) throws Exception {
+        return post("/api/players", "{\"name\":\"" + name + "\"}");
+    }
+
+    /** An account, which can play anything. */
     private Account register(String name) throws Exception {
-        var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/players"))
+        String email = name.toLowerCase(Locale.ROOT) + "-" + UUID.randomUUID() + "@example.com";
+        return post("/api/players/register", "{\"email\":\"" + email + "\",\"username\":\"" + name + "\",\"password\":\"password1\"}");
+    }
+
+    private Account post(String path, String body) throws Exception {
+        var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString("{\"name\":\"" + name + "\"}")).build();
-        JsonNode body = json.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body());
-        return new Account(UUID.fromString(body.get("playerId").asString()), body.get("token").asString());
+                .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+        JsonNode res = json.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body());
+        return new Account(UUID.fromString(res.get("playerId").asString()), res.get("token").asString());
     }
 
     @Test
@@ -70,7 +82,7 @@ class GameSocketIT {
     @Test
     void twoPlayersPlayACoopGame() throws Exception {
         BotClient host = BotClient.connect(port, register("Host").token());
-        BotClient guest = BotClient.connect(port, register("Guest").token());
+        BotClient guest = BotClient.connect(port, register("Joiner").token());
 
         host.send(BotClient.msg("create").put("mapId", "house").put("solo", false));
         String code = host.await("welcome").get("room").get("code").asString();
@@ -124,7 +136,7 @@ class GameSocketIT {
 
     @Test
     void reconnectingResumesTheRoom() throws Exception {
-        Account acc = register("Flaky");
+        Account acc = guest("Flaky");
         BotClient first = BotClient.connect(port, acc.token());
         first.send(BotClient.msg("create").put("mapId", "house").put("solo", true));
         String code = first.await("welcome").get("room").get("code").asString();
@@ -142,8 +154,20 @@ class GameSocketIT {
     }
 
     @Test
+    void guestsAreKeptToSoloOnTheHouse() throws Exception {
+        BotClient bot = BotClient.connect(port, guest("Visitor").token());
+        bot.send(BotClient.msg("create").put("mapId", "farmstead").put("solo", true));
+        assertThat(bot.await("error").get("message").asString()).startsWith("Create an account to play");
+        bot.send(BotClient.msg("create").put("mapId", "house").put("solo", false));
+        assertThat(bot.await("error", e -> e.get("message").asString().endsWith("online"), Duration.ofSeconds(5))).isNotNull();
+        bot.send(BotClient.msg("create").put("mapId", "house").put("solo", true));
+        assertThat(bot.await("welcome")).isNotNull();
+        bot.close();
+    }
+
+    @Test
     void badMessagesGetAnError() throws Exception {
-        BotClient bot = BotClient.connect(port, register("Fumbler").token());
+        BotClient bot = BotClient.connect(port, guest("Fumbler").token());
         bot.send("{\"type\":\"teleport\"}");
         assertThat(bot.await("error").get("message").asString()).startsWith("Bad message");
         bot.send(BotClient.msg("start"));
