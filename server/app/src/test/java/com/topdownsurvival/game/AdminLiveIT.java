@@ -56,6 +56,11 @@ class AdminLiveIT {
         return res.headers().firstValue("Set-Cookie").orElseThrow().split(";")[0];
     }
 
+    private JsonNode mapStats(String cookie, String mapId) throws Exception {
+        for (JsonNode m : get("/api/admin/maps", cookie)) if (m.get("id").asString().equals(mapId)) return m;
+        throw new AssertionError("no map " + mapId);
+    }
+
     @Test
     void liveGamesAreListedWatchedAndThenRecorded() throws Exception {
         String root = login();
@@ -73,6 +78,7 @@ class AdminLiveIT {
         assertThat(room.get("members").get(0).get("name").asString()).isEqualTo("Watched");
         String gameId = room.get("gameId").asString();
         assertThat(get("/api/admin/overview", root).get("playing").asInt()).isPositive();
+        assertThat(mapStats(root, "house").get("playingNow").asInt()).isPositive();
 
         // Watching needs the admin cookie and the same origin.
         assertThatThrownBy(() -> BotClient.watch(port, code, null, null)).isInstanceOf(Exception.class);
@@ -108,6 +114,13 @@ class AdminLiveIT {
         assertThat(detail.get("player").get("games").asInt()).isEqualTo(1);
         assertThat(detail.get("games").get(0).get("gameId").asString()).isEqualTo(gameId);
         assertThat(get("/api/admin/games?player=" + id, root)).hasSize(1);
+
+        JsonNode house = mapStats(root, "house");
+        assertThat(house.get("games").asInt()).isPositive();
+        assertThat(house.get("players").asInt()).isPositive();
+        assertThat(house.get("kills").asInt()).isGreaterThanOrEqualTo(9);
+        assertThat(house.get("bestBy").isNull()).isFalse();
+        assertThat(house.get("avgRound").isNull()).isFalse();
 
         admin.close();
         bot.close();

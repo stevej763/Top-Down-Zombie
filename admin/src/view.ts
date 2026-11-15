@@ -10,7 +10,7 @@ import type { Editor, Rect } from './editor';
 import { footprint, TILES, toDoc, type Draft } from './model';
 
 /** Seeded like scripts/render-maps.ts, so the yard speckle doesn't shimmer on every re-render. */
-function seededRandom<T>(fn: () => T): T {
+export function seededRandom<T>(fn: () => T): T {
   let seed = 42;
   const real = Math.random;
   Math.random = () => {

@@ -18,23 +18,28 @@ const listEl = h('div', {});
 const moreEl = h('button', { onclick: () => void load(true) }, 'Load more');
 const detailEl = h('div', { class: 'detail' });
 let rows: GameRow[] = [];
-let mapsLoaded = false;
+let mapsLoaded: Promise<void> | null = null;
 
 mapEl.addEventListener('change', () => void load(false));
 reasonEl.addEventListener('change', () => void load(false));
 
-/** Every game played, newest first; `#games/<id>` shows one. */
+/** Every game played, newest first; `#games/<id>` shows one, and `#games?map=<id>` filters to a map. */
 export const gamesPage: Page = {
   show(id) {
+    const map = new URLSearchParams(location.hash.split('?')[1] ?? '').get('map');
     el.replaceChildren(
       h('div', { class: 'dash-head' }, h('h1', {}, 'Games'), h('span', { class: 'spacer' }), mapEl, reasonEl,
         h('button', { onclick: () => void load(false) }, 'Refresh')),
       h('div', { class: 'split' }, h('div', { class: 'split-main' }, listEl, moreEl), detailEl));
-    if (!mapsLoaded) {
-      mapsLoaded = true;
-      listMaps().then((maps) => mapEl.append(...maps.map((m) => h('option', { value: m.id }, m.name)))).catch(() => (mapsLoaded = false));
-    }
-    void load(false);
+    mapsLoaded ??= listMaps()
+      .then((maps) => void mapEl.append(...maps.map((m) => h('option', { value: m.id }, m.name))))
+      .catch(() => void (mapsLoaded = null));
+    if (map === null) void load(false);
+    // The option has to exist before the select can take the value.
+    else void mapsLoaded.then(() => {
+      mapEl.value = map;
+      void load(false);
+    });
     if (id) void openGame(id);
     else detailEl.replaceChildren(h('p', { class: 'hint' }, 'Pick a game to see who played it.'));
   },

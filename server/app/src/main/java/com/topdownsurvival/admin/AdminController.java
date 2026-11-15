@@ -30,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
-/** What the admin portal's Live, Games and Players pages read. Everything needs an admin session. */
+/** What the admin portal's Live, Games, Players and Maps pages read. Everything needs an admin session. */
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
@@ -58,6 +58,11 @@ public class AdminController {
 
     public record PlayerDevice(String deviceId, String platform, String os, String browser, String model, String userAgent,
             String ip, Map<String, Object> details, Instant firstSeenAt, Instant lastSeenAt) {}
+
+    /** A map with how it's been played. Averages count only games that ended in a game over. */
+    public record MapStats(String id, String name, int version, int width, int height, Instant updatedAt, long games,
+            long gamesToday, long players, Integer bestRound, String bestBy, Double avgRound, long kills, Long avgLengthMs,
+            Instant lastPlayedAt, int playingNow, int inLobby) {}
 
     public record PlayerIp(String ip, Instant firstSeenAt, Instant lastSeenAt, long otherPlayers) {}
 
@@ -87,7 +92,7 @@ public class AdminController {
         List<GameRoom.LiveRoom> rooms = live();
         Map<UUID, String> inRooms = roomByPlayer(rooms);
         Instant now = clock.instant();
-        Timestamp today = Timestamp.from(now.atZone(ZoneOffset.UTC).truncatedTo(ChronoUnit.DAYS).toInstant());
+        Timestamp today = startOfDay(now);
         List<UUID> seen = db.sql("SELECT id FROM players WHERE last_seen_at > ?")
                 .param(Timestamp.from(now.minus(ONLINE)))
                 .query(UUID.class)
@@ -183,6 +188,44 @@ public class AdminController {
         return new GameRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4), rs.getBoolean(5),
                 rs.getInt(6), instant(rs, 7), instant(rs, 8), rs.getString(9), (Integer) rs.getObject(10), rs.getString(11),
                 rs.getInt(12), rs.getInt(13));
+    }
+
+    // ------------------------------------------------------------- maps
+
+    @GetMapping("/maps")
+    public List<MapStats> maps(HttpServletRequest request) {
+        auth.require(request);
+        List<GameRoom.LiveRoom> rooms = live();
+        return db.sql("""
+                SELECT m.id, m.name, m.version, (m.data->>'width')::int, (m.data->>'height')::int, m.updated_at,
+                       g.games, g.today, p.players, g.best, b.name, g.avg_round, p.kills, g.avg_ms, g.last
+                FROM maps m
+                LEFT JOIN LATERAL (
+                    SELECT count(*) AS games, count(*) FILTER (WHERE started_at >= ?) AS today, max(round) AS best,
+                           avg(round) FILTER (WHERE end_reason = 'over') AS avg_round,
+                           avg(extract(epoch FROM ended_at - started_at) * 1000) FILTER (WHERE end_reason = 'over') AS avg_ms,
+                           max(started_at) AS last
+                    FROM games WHERE map_id = m.id) g ON true
+                LEFT JOIN LATERAL (
+                    SELECT count(DISTINCT gp.player_id) AS players, coalesce(sum(gp.kills), 0) AS kills
+                    FROM game_players gp JOIN games gg ON gg.id = gp.game_id WHERE gg.map_id = m.id) p ON true
+                LEFT JOIN LATERAL (
+                    SELECT pl.name FROM scores s JOIN players pl ON pl.id = s.player_id WHERE s.map_id = m.id
+                    ORDER BY s.round DESC, s.kills DESC, s.points DESC, s.created_at LIMIT 1) b ON true
+                WHERE m.published ORDER BY m.name""")
+                .param(startOfDay(clock.instant()))
+                .query((rs, _) -> {
+                    String id = rs.getString(1);
+                    Number avgRound = (Number) rs.getObject(12);
+                    Number avgMs = (Number) rs.getObject(14);
+                    return new MapStats(id, rs.getString(2), rs.getInt(3), rs.getInt(4), rs.getInt(5), instant(rs, 6),
+                            rs.getLong(7), rs.getLong(8), rs.getLong(9), (Integer) rs.getObject(10), rs.getString(11),
+                            avgRound == null ? null : avgRound.doubleValue(), rs.getLong(13),
+                            avgMs == null ? null : avgMs.longValue(), instant(rs, 15),
+                            (int) rooms.stream().filter(r -> r.mapId().equals(id) && r.state().equals("playing")).count(),
+                            (int) rooms.stream().filter(r -> r.mapId().equals(id) && r.state().equals("lobby")).count());
+                })
+                .list();
     }
 
     // ------------------------------------------------------------- players
@@ -287,6 +330,10 @@ public class AdminController {
         var spec = db.sql(sql);
         if (param != null) spec = spec.param(param);
         return spec.query(Long.class).single();
+    }
+
+    private static Timestamp startOfDay(Instant now) {
+        return Timestamp.from(now.atZone(ZoneOffset.UTC).truncatedTo(ChronoUnit.DAYS).toInstant());
     }
 
     private Map<String, Object> details(String raw) {
