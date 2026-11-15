@@ -11,3 +11,6 @@ client/public/audio/sound-track.mp3
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# Local secrets (see .env.example)
+.env

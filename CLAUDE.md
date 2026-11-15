@@ -22,7 +22,7 @@ cd admin && npm run dev        # admin portal on http://localhost:5174; proxies 
 cd admin && npm run build      # its type-check (also type-checks the client files it imports)
 cd mobile && npm run dev       # touch client on http://localhost:5175 (and the LAN); proxies /api and /ws (API_TARGET as for admin)
 cd mobile && npm run build     # its type-check; VITE_SERVER_URL=https://<server> npm run sync builds and copies into ios/ and android/
-docker compose up -d --build   # db + server + web (nginx) on http://localhost:8551, admin on :8552 (set ADMIN_USERNAME/ADMIN_PASSWORD in .env for the first admin login; Gradle/npm caches persist, see Assets)
+docker compose up -d --build   # db + server + web (nginx) on http://localhost:8551, admin on :8552 (copy `.env.example` to `.env` and set ADMIN_USERNAME/ADMIN_PASSWORD for the first admin login; Gradle/npm caches persist, see Assets)
 ```
 
 No JDK is installed on the dev machine, so Gradle runs in Docker (the `gradle-cache` volume keeps dependencies between runs; the socket mount is for Testcontainers):
@@ -156,7 +156,7 @@ WASD/arrows move · mouse aims · Space or left click fires · R reload · E int
 
 ## Testing without a browser
 No browser automation was available while this was built. Gameplay is covered by the Java tests (`GameSimTest`, `CoopSimTest`, `SimParityTest`; construct a `GameSim` with a map and seed and call `step()`), the room and socket layer by `GameRoomTest` and `GameSocketIT`. The client (`core/Game.ts`, rendering, HUD) was smoke-tested with throwaway headless scripts that stub `document`, `window` and the canvas context with a no-op Proxy, then drive `game.update(1/60)` / `game.render()` while every event type fires. Gotchas if you recreate them:
-- Two ways to drive the client headlessly: pass `new Game(canvas, maps, doc, link)` a fake `Link` whose `drain()` returns scripted messages (welcome/lobby/start/snapshots/events/gameOver), or use the real `Connection` against `docker compose up` by also stubbing `localStorage`, `location.origin` (`http://localhost:8551`) and `fetch` (prefix relative URLs with the origin); Node's global `WebSocket` does the rest. Override `game.readInput` with a bot. Two processes (host and guest, sharing the room code through a file) give a real co-op game, since `localStorage` (the identity) is per process. For latency, add `DEBUG_LATENCY_MS: "100"` to the server's environment with a compose override file.
+- Two ways to drive the client headlessly: pass `new Game(canvas, maps, doc, link)` a fake `Link` whose `drain()` returns scripted messages (welcome/lobby/start/snapshots/events/gameOver), or use the real `Connection` against `docker compose up` by also stubbing `localStorage`, `location.origin` (`http://localhost:8551`) and `fetch` (prefix relative URLs with the origin); Node's global `WebSocket` does the rest. Override `game.readInput` with a bot. Two processes (host and guest, sharing the room code through a file) give a real co-op game, since `localStorage` (the identity) is per process. For latency, set `DEBUG_LATENCY_MS=100` in `.env`.
 - Run them with `npx vite-node` (no longer a dev dependency; npx fetches it), not `tsx`, because `import.meta.env` is only defined under Vite.
 - Import project modules by **absolute** path. A mixed relative/absolute import loads a second copy of each module and breaks `instanceof`.
 - The bot is weak: on the original code it averaged about round 3 on the house map. Use survival only as a smoke test, not a balance measure.
