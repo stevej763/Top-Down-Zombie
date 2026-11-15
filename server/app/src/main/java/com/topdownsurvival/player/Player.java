@@ -23,7 +23,7 @@ public class Player {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    /** Null for guests. Not verified yet: for now it's only what an account signs in with. */
+    /** Null for guests. What an account signs in with; see {@link #isVerified()}. */
     @Column(length = 254)
     private String email;
 
@@ -33,6 +33,10 @@ public class Player {
     /** When the guest became an account (or the account was created). */
     @Column(name = "account_at")
     private Instant accountAt;
+
+    /** When the account typed the code it was emailed; until then it plays under guest rules. */
+    @Column(name = "email_verified_at")
+    private Instant emailVerifiedAt;
 
     protected Player() {}
 
@@ -50,6 +54,8 @@ public class Player {
     void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
     public boolean isAccount() { return email != null; }
+    public boolean isVerified() { return emailVerifiedAt != null; }
+    public Instant getEmailVerifiedAt() { return emailVerifiedAt; }
 
     /** Makes this player an account; the caller has checked the email and name are free. */
     void becomeAccount(String email, String name, String passwordHash, Instant now) {

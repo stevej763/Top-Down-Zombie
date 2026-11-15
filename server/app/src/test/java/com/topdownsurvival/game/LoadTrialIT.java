@@ -11,10 +11,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -40,6 +42,9 @@ class LoadTrialIT {
     @LocalServerPort
     int port;
 
+    @Autowired
+    JdbcClient db;
+
     @Test
     void tenRoomsOfFourBots() throws Exception {
         HttpClient http = HttpClient.newHttpClient();
@@ -49,13 +54,15 @@ class LoadTrialIT {
         for (int r = 0; r < ROOMS; r++) {
             List<BotClient> room = new ArrayList<>();
             for (int i = 0; i < PER_ROOM; i++) {
-                // Accounts: guests can't host co-op.
+                // Verified accounts: guests and unverified accounts can't host co-op.
                 String body = "{\"email\":\"bot-" + r + "-" + i + "@example.com\",\"username\":\"Bot " + r + "-" + i
                         + "\",\"password\":\"password1\"}";
                 var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/players/register"))
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(body)).build();
-                String token = json.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body()).get("token").asString();
+                var created = json.readTree(http.send(req, HttpResponse.BodyHandlers.ofString()).body());
+                db.sql("UPDATE players SET email_verified_at = now() WHERE id = ?::uuid").param(created.get("playerId").asString()).update();
+                String token = created.get("token").asString();
                 room.add(BotClient.connect(port, token));
             }
             room.getFirst().send(BotClient.msg("create").put("mapId", "house").put("solo", false));

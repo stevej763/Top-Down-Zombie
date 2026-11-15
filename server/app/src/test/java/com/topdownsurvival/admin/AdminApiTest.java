@@ -186,6 +186,7 @@ class AdminApiTest {
         assertThat(d.get("createdIp").asString()).isNotBlank();
         assertThat(d.get("player").get("lastIp").asString()).isEqualTo(d.get("createdIp").asString());
         assertThat(d.get("ips")).hasSize(1);
+        assertThat(d.get("player").get("emailVerifiedAt").isNull()).isTrue();
         assertThat(d.get("devices")).hasSize(2);
         JsonNode phone = d.get("devices").get(1);
         assertThat(phone.get("deviceId").asString()).isEqualTo("dev-1");

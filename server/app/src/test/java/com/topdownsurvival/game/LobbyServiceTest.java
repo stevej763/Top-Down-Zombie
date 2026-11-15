@@ -3,6 +3,7 @@ package com.topdownsurvival.game;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.topdownsurvival.game.FakeConnection.ManualClock;
+import com.topdownsurvival.game.LobbyService.Access;
 import com.topdownsurvival.game.protocol.ServerMessage;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -35,12 +36,12 @@ class LobbyServiceTest {
     }
 
     String create(Client c, boolean solo) {
-        assertThat(lobby.create(c.account(), c.name(), false, "house", solo, c.conn())).isNull();
+        assertThat(lobby.create(c.account(), c.name(), Access.FULL, "house", solo, c.conn())).isNull();
         return c.conn().last(ServerMessage.Welcome.class).room().code();
     }
 
     String join(Client c, String code) {
-        return lobby.join(c.account(), c.name(), false, code, c.conn());
+        return lobby.join(c.account(), c.name(), Access.FULL, code, c.conn());
     }
 
     @Test
@@ -55,21 +56,31 @@ class LobbyServiceTest {
     @Test
     void guestsOnlyPlaySoloOnGuestMaps() {
         Client g = client("Guest");
-        assertThat(lobby.create(g.account(), g.name(), true, "house", false, g.conn())).isEqualTo(LobbyService.GUEST_ONLINE);
-        assertThat(lobby.create(g.account(), g.name(), true, "farmstead", true, g.conn())).startsWith("Create an account to play");
+        assertThat(lobby.create(g.account(), g.name(), Access.GUEST, "house", false, g.conn())).isEqualTo("Create an account to play online");
+        assertThat(lobby.create(g.account(), g.name(), Access.GUEST, "farmstead", true, g.conn())).startsWith("Create an account to play");
         assertThat(lobby.roomCount()).isZero();
 
         String code = create(client("Host"), false);
-        assertThat(lobby.join(g.account(), g.name(), true, code, g.conn())).isEqualTo(LobbyService.GUEST_ONLINE);
+        assertThat(lobby.join(g.account(), g.name(), Access.GUEST, code, g.conn())).isEqualTo("Create an account to play online");
 
-        assertThat(lobby.create(g.account(), g.name(), true, "house", true, g.conn())).isNull();
+        assertThat(lobby.create(g.account(), g.name(), Access.GUEST, "house", true, g.conn())).isNull();
         assertThat(lobby.roomOf(g.account())).isPresent();
+    }
+
+    @Test
+    void unverifiedAccountsPlayLikeGuestsAndAreToldToVerify() {
+        Client u = client("Unverified");
+        assertThat(lobby.create(u.account(), u.name(), Access.UNVERIFIED, "house", false, u.conn())).isEqualTo("Verify your email to play online");
+        assertThat(lobby.create(u.account(), u.name(), Access.UNVERIFIED, "farmstead", true, u.conn())).startsWith("Verify your email to play");
+        String code = create(client("Host"), false);
+        assertThat(lobby.join(u.account(), u.name(), Access.UNVERIFIED, code, u.conn())).isEqualTo("Verify your email to play online");
+        assertThat(lobby.create(u.account(), u.name(), Access.UNVERIFIED, "house", true, u.conn())).isNull();
     }
 
     @Test
     void accountsPlayAnyMapAnyWay() {
         Client a = client("Account");
-        assertThat(lobby.create(a.account(), a.name(), false, "farmstead", false, a.conn())).isNull();
+        assertThat(lobby.create(a.account(), a.name(), Access.FULL, "farmstead", false, a.conn())).isNull();
         Client b = client("Friend");
         assertThat(join(b, a.conn().last(ServerMessage.Welcome.class).room().code())).isNull();
     }
@@ -77,7 +88,7 @@ class LobbyServiceTest {
     @Test
     void unknownMapsAndCodesAreRejected() {
         Client a = client("A");
-        assertThat(lobby.create(a.account(), a.name(), false, "nowhere", false, a.conn())).contains("No map");
+        assertThat(lobby.create(a.account(), a.name(), Access.FULL, "nowhere", false, a.conn())).contains("No map");
         assertThat(join(a, "ZZZZ")).contains("No room");
     }
 

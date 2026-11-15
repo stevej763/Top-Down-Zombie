@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -38,6 +39,9 @@ class GameSocketIT {
 
     @Autowired
     LobbyService lobby;
+
+    @Autowired
+    JdbcClient db;
 
     private final HttpClient http = HttpClient.newHttpClient();
     private final JsonMapper json = JsonMapper.builder().build();
@@ -60,10 +64,22 @@ class GameSocketIT {
         return post("/api/players", "{\"name\":\"" + name + "\"}");
     }
 
-    /** An account, which can play anything. */
+    /** A verified account, which can play anything. */
     private Account register(String name) throws Exception {
+        Account acc = unverified(name);
+        verify(acc);
+        return acc;
+    }
+
+    /** An account that hasn't typed its code yet: guest rules. */
+    private Account unverified(String name) throws Exception {
         String email = name.toLowerCase(Locale.ROOT) + "-" + UUID.randomUUID() + "@example.com";
         return post("/api/players/register", "{\"email\":\"" + email + "\",\"username\":\"" + name + "\",\"password\":\"password1\"}");
+    }
+
+    /** The code flow itself is covered by ApiIntegrationTest. */
+    private void verify(Account acc) {
+        db.sql("UPDATE players SET email_verified_at = now() WHERE id = ?").param(acc.id()).update();
     }
 
     private Account post(String path, String body) throws Exception {
@@ -163,6 +179,26 @@ class GameSocketIT {
         bot.send(BotClient.msg("create").put("mapId", "house").put("solo", true));
         assertThat(bot.await("welcome")).isNotNull();
         bot.close();
+    }
+
+    @Test
+    void unverifiedAccountsPlayAsGuestsUntilTheyVerifyAndReconnect() throws Exception {
+        Account acc = unverified("Pending");
+        BotClient bot = BotClient.connect(port, acc.token());
+        bot.send(BotClient.msg("create").put("mapId", "farmstead").put("solo", true));
+        assertThat(bot.await("error").get("message").asString()).startsWith("Verify your email to play");
+        verify(acc);
+        // Access is read at the handshake, so the same socket is still limited.
+        bot.send(BotClient.msg("create").put("mapId", "house").put("solo", false));
+        assertThat(bot.await("error", e -> e.get("message").asString().equals("Verify your email to play online"), Duration.ofSeconds(5)))
+                .isNotNull();
+        bot.close();
+
+        BotClient again = BotClient.connect(port, acc.token());
+        again.send(BotClient.msg("create").put("mapId", "farmstead").put("solo", false));
+        assertThat(again.await("welcome").get("map").get("id").asString()).isEqualTo("farmstead");
+        again.send(BotClient.msg("leave"));
+        again.close();
     }
 
     @Test

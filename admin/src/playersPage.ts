@@ -53,7 +53,7 @@ async function load(more: boolean): Promise<void> {
     listEl.replaceChildren(table([
       { title: '', cell: (p) => dot(p.online, p.online ? 'Online' : 'Offline') },
       { title: 'Name', cell: (p) => p.name },
-      { title: 'Account', cell: (p) => p.email ?? 'guest' },
+      { title: 'Account', cell: (p) => (p.email ? (p.emailVerifiedAt ? p.email : `${p.email} (unverified)`) : 'guest') },
       { title: 'Now', cell: (p) => (p.room ? h('a', { href: `#live/${p.room}` }, `room ${p.room}`) : p.online ? 'in the menus' : '') },
       { title: 'Last seen', cell: (p) => ago(p.lastSeenAt) },
       { title: 'Joined', cell: (p) => ago(p.createdAt) },
@@ -109,6 +109,7 @@ async function openPlayer(id: string): Promise<void> {
       h('dl', { class: 'facts-list' },
         h('dt', {}, 'Now'), h('dd', {}, p.room ? h('a', { href: `#live/${p.room}` }, `In room ${p.room} (watch)`) : p.online ? 'In the menus' : 'Offline'),
         h('dt', {}, 'Account'), h('dd', {}, p.email ? `${p.email} (since ${when(p.accountAt)})` : 'Guest'),
+        ...(p.email ? [h('dt', {}, 'Email'), h('dd', {}, p.emailVerifiedAt ? `Verified ${when(p.emailVerifiedAt)}` : 'Not verified (plays as a guest)')] : []),
         h('dt', {}, 'Last seen'), h('dd', {}, `${ago(p.lastSeenAt)} (${when(p.lastSeenAt)})`),
         h('dt', {}, 'Joined'), h('dd', {}, when(p.createdAt)),
         h('dt', {}, 'Games'), h('dd', {}, num(p.games)),

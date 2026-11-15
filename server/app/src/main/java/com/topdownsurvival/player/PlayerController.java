@@ -37,22 +37,27 @@ public class PlayerController {
 
     public record PasswordRequest(String current, String password) {}
 
-    public record PlayerCreated(UUID playerId, String name, String token, boolean account) {}
+    public record CodeRequest(String code) {}
 
-    public record PlayerView(UUID playerId, String name, boolean account, String email) {
+    /** {@code verified}: an account that has confirmed its email; until then it plays under guest rules. */
+    public record PlayerCreated(UUID playerId, String name, String token, boolean account, boolean verified) {}
+
+    public record PlayerView(UUID playerId, String name, boolean account, String email, boolean verified) {
         static PlayerView of(Player p) {
-            return new PlayerView(p.getId(), p.getName(), p.isAccount(), p.getEmail());
+            return new PlayerView(p.getId(), p.getName(), p.isAccount(), p.getEmail(), p.isVerified());
         }
     }
 
     private final PlayerAuth auth;
     private final PlayerAccounts accounts;
     private final PlayerActivity activity;
+    private final EmailVerification verification;
 
-    public PlayerController(PlayerAuth auth, PlayerAccounts accounts, PlayerActivity activity) {
+    public PlayerController(PlayerAuth auth, PlayerAccounts accounts, PlayerActivity activity, EmailVerification verification) {
         this.auth = auth;
         this.accounts = accounts;
         this.activity = activity;
+        this.verification = verification;
     }
 
     /** A guest: just a name. */
@@ -74,6 +79,8 @@ public class PlayerController {
         Player guest = auth.find(token).orElse(null);
         PlayerAccounts.SignedIn s = accounts.register(guest, token, req.email(), req.username(), req.password());
         if (guest == null) activity.registered(s.player().getId(), request.getRemoteAddr());
+        // After register's transaction, so a signup that fails never sends a code.
+        verification.send(s.player());
         return created(s);
     }
 
@@ -111,6 +118,21 @@ public class PlayerController {
         accounts.changePassword(auth.require(authorization), PlayerAuth.bearer(authorization), req.current(), req.password());
     }
 
+    /** Checks the code the account was emailed. */
+    @PostMapping("/me/verify")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void verify(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            @RequestBody CodeRequest req) {
+        verification.verify(auth.require(authorization), req.code());
+    }
+
+    /** Emails a new code (429 if asked again within a minute, or too often in a day). */
+    @PostMapping("/me/verify/resend")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resendCode(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+        verification.send(auth.require(authorization));
+    }
+
     /**
      * The app's heartbeat while it's open, so the admin portal can show who's online, from where and
      * on what. The body (the device) is optional.
@@ -144,6 +166,6 @@ public class PlayerController {
     }
 
     private static PlayerCreated created(PlayerAccounts.SignedIn s) {
-        return new PlayerCreated(s.player().getId(), s.player().getName(), s.token(), s.player().isAccount());
+        return new PlayerCreated(s.player().getId(), s.player().getName(), s.token(), s.player().isAccount(), s.player().isVerified());
     }
 }

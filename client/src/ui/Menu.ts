@@ -1,6 +1,9 @@
 import { sound, type VolumeChannel } from '../audio/Sound';
 import { VIEW_H, VIEW_W, type Game } from '../core/Game';
-import { canPlay, isAccount, loadIdentity, login, logout, NAME_MAX, needsLogin, register, setName, validName, changePassword, type Outcome } from '../net/api';
+import {
+  canPlay, changePassword, isAccount, loadIdentity, login, logout, NAME_MAX, needsLogin, needsVerifying, register, resendCode,
+  setName, unlocked, validName, verifyEmail, type Outcome,
+} from '../net/api';
 import { MAX_SCORES } from '../systems/HighScore';
 import { controlText } from './keys';
 import { DISPLAY_FONT, shadowText } from './text';
@@ -8,11 +11,11 @@ import { DISPLAY_FONT, shadowText } from './text';
 /** Title menu and pause menu: pages of buttons/sliders driven by keyboard or mouse. */
 
 type Page = 'main' | 'scores' | 'audio' | 'controls' | 'name' | 'maps' | 'mode' | 'join' | 'lobby'
-  | 'welcome' | 'login' | 'register' | 'account' | 'password';
+  | 'welcome' | 'login' | 'register' | 'account' | 'password' | 'verify';
 /** Where to carry on once the player has a name or has signed in. */
 type Then = 'play' | 'join' | 'mode' | 'main' | 'account';
 /** What a text field holds, so the phone can bring up the right keyboard. */
-export type TextKind = 'text' | 'email' | 'password';
+export type TextKind = 'text' | 'email' | 'password' | 'code';
 export type MenuMode = 'title' | 'pause';
 
 type Item =
@@ -39,6 +42,7 @@ const LAYOUT: Record<Page, { y: number; step: number; w: number }> = {
   register: { y: 200, step: 56, w: 520 },
   account: { y: 240, step: 52, w: 300 },
   password: { y: 220, step: 56, w: 520 },
+  verify: { y: 220, step: 52, w: 300 },
 };
 const EMAIL_MAX = 254;
 /** PlayerAccounts.MAX_PASSWORD_BYTES; the server has the final say on length. */
@@ -46,6 +50,9 @@ const PASSWORD_MAX = 72;
 /** Room codes: 4 letters, without I, L or O (LobbyService.CODE_LETTERS). */
 const CODE_LENGTH = 4;
 const CODE_FILTER = /[^A-HJKMNP-Z]/g;
+/** The emailed code: EmailVerification's 6 digits. */
+const VERIFY_LENGTH = 6;
+const VERIFY_FILTER = /\D/g;
 const PAUSE_MAIN_Y = 230;
 const ROW_H = 42;
 const BUTTON_MAX_W = 300;
@@ -57,7 +64,7 @@ const SLIDER_STEP = 0.1;
 const TITLES: Record<Page, string> = {
   main: 'PAUSED', scores: 'HIGH SCORES', audio: 'AUDIO', controls: 'CONTROLS', name: 'YOUR NAME', maps: 'CHOOSE MAP',
   mode: 'NEW GAME', join: 'JOIN GAME', lobby: 'LOBBY', welcome: 'WELCOME', login: 'LOG IN', register: 'CREATE ACCOUNT',
-  account: 'ACCOUNT', password: 'PASSWORD',
+  account: 'ACCOUNT', password: 'PASSWORD', verify: 'VERIFY EMAIL',
 };
 
 export class Menu {
@@ -72,6 +79,7 @@ export class Menu {
   private emailDraft = '';
   private passDraft = '';
   private newPassDraft = '';
+  private verifyDraft = '';
   /** Where the name, login and register pages carry on to once they're done. */
   private then: Then = 'main';
   /** The page that login and register go back to. */
@@ -79,6 +87,8 @@ export class Menu {
   /** Why the register page was opened (a locked map, co-op), shown above the form. */
   private reason = '';
   private notice = '';
+  /** The notice is good news (code sent, password changed), not a problem. */
+  private noticeOk = false;
   /** Waiting for the server to answer a create or join; ignore further picks. */
   private loading = false;
   /** Waiting for the server to answer a login, signup, rename or password change. */
@@ -96,6 +106,7 @@ export class Menu {
   /** The server refused something (or the connection was lost); show why. */
   fail(message: string): void {
     this.notice = message;
+    this.noticeOk = false;
     this.loading = false;
     sound.denied();
   }
@@ -115,6 +126,12 @@ export class Menu {
     this.page = page;
     this.index = page === 'main' ? this.mainIndex : 0;
     this.notice = '';
+    this.noticeOk = false;
+  }
+
+  private tell(message: string): void {
+    this.notice = message;
+    this.noticeOk = true;
   }
 
   /** New Game: guest or account the first time, then pick a map if there's a choice, then solo or co-op. */
@@ -149,6 +166,28 @@ export class Menu {
     this.go('register');
   }
 
+  /** The code was mailed at signup; `reason` says what verifying would unlock, when they hit a lock. */
+  private openVerify(then: Then, back: Page, reason = ''): void {
+    this.then = then;
+    this.returnPage = back;
+    this.reason = reason;
+    this.verifyDraft = '';
+    this.go('verify');
+  }
+
+  /** A guest or unverified account hit a lock: the page that lifts it, saying what it unlocks ("play online"). */
+  private unlock(then: Then, back: Page, what: string): void {
+    if (needsVerifying()) this.openVerify(then, back, `Verify your email to ${what}`);
+    else this.openRegister(then, back, `Create a free account to ${what}`);
+  }
+
+  /** Signed up or in: an unverified account is asked for its code first (it can skip that). */
+  private signedIn(game: Game): void {
+    this.passDraft = '';
+    if (needsVerifying()) this.openVerify(this.then, this.returnPage, this.reason);
+    else this.proceed(game);
+  }
+
   /** Carry on to wherever the player was heading before they named themselves or signed in. */
   private proceed(game: Game): void {
     switch (this.then) {
@@ -181,10 +220,7 @@ export class Menu {
       this.fail('Type your email and password');
       return;
     }
-    this.account(game, () => login(this.emailDraft, this.passDraft), () => {
-      this.passDraft = '';
-      this.proceed(game);
-    });
+    this.account(game, () => login(this.emailDraft, this.passDraft), () => this.signedIn(game));
   }
 
   private submitRegister(game: Game): void {
@@ -197,10 +233,23 @@ export class Menu {
       this.fail("Usernames: letters, numbers, spaces and . _ ' - only");
       return;
     }
-    this.account(game, () => register(this.emailDraft, name, this.passDraft), () => {
-      this.passDraft = '';
+    this.account(game, () => register(this.emailDraft, name, this.passDraft), () => this.signedIn(game));
+  }
+
+  private submitVerify(game: Game): void {
+    if (this.verifyDraft.length !== VERIFY_LENGTH) {
+      this.fail(`Type the ${VERIFY_LENGTH}-digit code from the email`);
+      return;
+    }
+    this.account(game, () => verifyEmail(this.verifyDraft), () => {
+      this.verifyDraft = '';
       this.proceed(game);
+      this.tell('Email verified');
     });
+  }
+
+  private resend(game: Game): void {
+    this.account(game, resendCode, () => this.tell('Sent a new code'));
   }
 
   private submitPassword(game: Game): void {
@@ -211,7 +260,7 @@ export class Menu {
     this.account(game, () => changePassword(this.passDraft, this.newPassDraft), () => {
       this.passDraft = this.newPassDraft = '';
       this.go('account');
-      this.notice = 'Password changed';
+      this.tell('Password changed');
     });
   }
 
@@ -225,12 +274,12 @@ export class Menu {
   /** Guests hit a lock on co-op and on maps other than the guest maps. */
   private playSolo(game: Game): void {
     const map = game.maps.find((m) => m.id === game.mapId);
-    if (!canPlay(map, true)) this.openRegister('mode', 'mode', `Create a free account to play ${map?.name ?? game.mapId}`);
+    if (!canPlay(map, true)) this.unlock('mode', 'mode', `play ${map?.name ?? game.mapId}`);
     else this.request(() => game.createRoom(true));
   }
 
   private hostCoop(game: Game): void {
-    if (!isAccount()) this.openRegister('mode', 'mode', 'Create a free account to play online');
+    if (!unlocked()) this.unlock('mode', 'mode', 'play online');
     else this.request(() => game.createRoom(false));
   }
 
@@ -246,7 +295,7 @@ export class Menu {
   private chooseMap(game: Game, id: string): void {
     game.selectMap(id);
     const map = game.maps.find((m) => m.id === id);
-    if (!canPlay(map, true)) this.openRegister('mode', 'maps', `Create a free account to play ${map?.name ?? id}`);
+    if (!canPlay(map, true)) this.unlock('mode', 'maps', `play ${map?.name ?? id}`);
     else this.go('mode');
   }
 
@@ -255,8 +304,8 @@ export class Menu {
       this.openLogin('join', 'main');
       return;
     }
-    if (!isAccount()) {
-      this.openRegister('join', 'main', 'Create a free account to play online');
+    if (!unlocked()) {
+      this.unlock('join', 'main', 'play online');
       return;
     }
     this.codeDraft = '';
@@ -323,7 +372,8 @@ export class Menu {
     switch (this.page) {
       case 'name': return this.then === 'account' ? 'account' : this.then === 'main' ? 'main' : 'welcome';
       case 'login':
-      case 'register': return this.returnPage;
+      case 'register':
+      case 'verify': return this.returnPage;
       case 'password': return 'account';
       default: return 'main';
     }
@@ -385,14 +435,15 @@ export class Menu {
         return [
           ...game.maps.map((m): Item => {
             const locked = !canPlay(m, true);
-            return { type: 'button', label: locked ? `${m.name}  (account)` : m.name, dim: locked, run: () => this.chooseMap(game, m.id) };
+            const label = locked ? `${m.name}  (${needsVerifying() ? 'verify email' : 'account'})` : m.name;
+            return { type: 'button', label, dim: locked, run: () => this.chooseMap(game, m.id) };
           }),
           back,
         ];
       case 'mode':
         return [
           { type: 'button', label: 'Play Solo', run: () => this.playSolo(game) },
-          { type: 'button', label: 'Host Co-op', dim: !isAccount(), run: () => this.hostCoop(game) },
+          { type: 'button', label: 'Host Co-op', dim: !unlocked(), run: () => this.hostCoop(game) },
           { type: 'button', label: 'Back', run: () => this.leave(game) },
         ];
       case 'join':
@@ -447,6 +498,17 @@ export class Menu {
           { type: 'button', label: 'I Have an Account', run: () => this.openLogin(this.then, this.returnPage) },
           back,
         ];
+      case 'verify':
+        return [
+          {
+            type: 'text', label: 'Code', max: VERIFY_LENGTH, kind: 'code', get: () => this.verifyDraft,
+            set: (v) => { this.verifyDraft = v.replace(VERIFY_FILTER, ''); this.notice = ''; },
+            submit: () => this.submitVerify(game),
+          },
+          { type: 'button', label: 'Verify', run: () => this.submitVerify(game) },
+          { type: 'button', label: 'Send a New Code', run: () => this.resend(game) },
+          { type: 'button', label: 'Later', run: () => this.proceed(game) },
+        ];
       case 'password':
         return [
           field('Current', PASSWORD_MAX, 'password', () => this.passDraft, (v) => { this.passDraft = v; }, next),
@@ -461,7 +523,8 @@ export class Menu {
         if (needsLogin()) return [signIn, out, back];
         if (isAccount()) {
           const pw: Item = { type: 'button', label: 'Change Password', run: () => { this.passDraft = this.newPassDraft = ''; this.go('password'); } };
-          return [rename, pw, out, back];
+          const verify: Item = { type: 'button', label: 'Verify Email', run: () => this.openVerify('account', 'account') };
+          return needsVerifying() ? [verify, rename, pw, out, back] : [rename, pw, out, back];
         }
         return [
           { type: 'button', label: 'Create Account', run: () => this.openRegister('account', 'account') },
@@ -565,7 +628,7 @@ export class Menu {
       shadowText(ctx, 'Hold the house. Survive the rounds.', cx, 215, '16px monospace', '#c8c8c8', 'center', 'middle');
       const parts: string[] = [];
       const name = loadIdentity()?.name;
-      if (name) parts.push(`Playing as ${name}${isAccount() ? '' : ' (guest)'}`);
+      if (name) parts.push(`Playing as ${name}${!isAccount() ? ' (guest)' : needsVerifying() ? ' (email not verified)' : ''}`);
       const best = game.scores.entries[0];
       if (best) {
         const who = best.name ? `${best.name}, ` : '';
@@ -594,6 +657,10 @@ export class Menu {
       if (this.reason) shadowText(ctx, this.reason, cx, 145, '16px monospace', '#f2d15c', 'center', 'middle');
       const sub = id && !id.account ? 'Your scores come with you.' : 'Your username is shown in game and on the high scores.';
       shadowText(ctx, sub, cx, 170, '15px monospace', '#c8c8c8', 'center', 'middle');
+    } else if (this.page === 'verify') {
+      if (this.reason) shadowText(ctx, this.reason, cx, 145, '16px monospace', '#f2d15c', 'center', 'middle');
+      const email = loadIdentity()?.email;
+      shadowText(ctx, email ? `We emailed a code to ${email}.` : 'We emailed you a code.', cx, 172, '15px monospace', '#c8c8c8', 'center', 'middle');
     } else if (this.page === 'login') {
       shadowText(ctx, 'Log in to your account on this device.', cx, 160, '16px monospace', '#c8c8c8', 'center', 'middle');
     } else if (this.page === 'account') {
@@ -606,7 +673,7 @@ export class Menu {
     const notice = this.loading && game.link.problem ? `${game.link.problem}. Retrying…` : this.notice;
     if (notice && rects.length) {
       const last = rects[rects.length - 1];
-      const color = (this.loading && !game.link.problem) || this.busy || this.notice === 'Password changed' ? '#c8c8c8' : '#e05050';
+      const color = (this.loading && !game.link.problem) || this.busy || this.noticeOk ? '#c8c8c8' : '#e05050';
       shadowText(ctx, notice, cx, last.y + last.h + 36, '16px monospace', color, 'center', 'middle');
     }
     else if (this.page === 'controls') drawControls(ctx);
@@ -626,6 +693,8 @@ export class Menu {
           ? 'Type   ↑↓ move   Enter next   Esc back'
         : this.page === 'join'
           ? 'Type the code   Enter join   Esc back'
+        : this.page === 'verify'
+          ? 'Type the code   Enter verify   Esc back'
         : this.page === 'lobby'
           ? 'Share the code with your friends   Esc leave'
         : this.page === 'scores' && game.maps.length > 1
@@ -882,7 +951,7 @@ function drawAccount(ctx: CanvasRenderingContext2D): void {
       ? [`Playing as ${id.name} (guest)`, 'An account unlocks every map and online co-op']
       : !id.token
         ? [`${id.name}`, 'Signed out on this device']
-        : [`Signed in as ${id.name}`, id.email ?? ''];
+        : [`Signed in as ${id.name}`, id.verified ? id.email ?? '' : `${id.email ?? ''} (not verified: guest limits apply)`];
   shadowText(ctx, line, cx, 170, `24px ${DISPLAY_FONT}`, '#ffffff', 'center', 'middle');
   if (sub) shadowText(ctx, sub, cx, 202, '15px monospace', '#a0a0a0', 'center', 'middle');
 }
