@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -15,6 +16,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 final class TokenHandshakeInterceptor implements HandshakeInterceptor {
     static final String ACCOUNT = "account";
     static final String NAME = "name";
+    static final String IP = "ip";
 
     private final PlayerAuth auth;
 
@@ -33,6 +35,8 @@ final class TokenHandshakeInterceptor implements HandshakeInterceptor {
         }
         attributes.put(ACCOUNT, player.get().getId());
         attributes.put(NAME, player.get().getName());
+        // The servlet request's address honours X-Forwarded-For (forward-headers-strategy).
+        if (request instanceof ServletServerHttpRequest servlet) attributes.put(IP, servlet.getServletRequest().getRemoteAddr());
         return true;
     }
 

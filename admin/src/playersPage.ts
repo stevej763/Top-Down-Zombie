@@ -1,4 +1,4 @@
-import { AuthError, player, players, type PlayerGame, type PlayerRow } from './api';
+import { AuthError, player, players, type PlayerDevice, type PlayerGame, type PlayerIp, type PlayerRow } from './api';
 import { h, toast } from './dom';
 import { ago, between, num, when } from './fmt';
 import { outcome } from './gamesPage';
@@ -7,7 +7,7 @@ import { dot, table } from './table';
 
 const PAGE_SIZE = 50;
 const el = document.getElementById('page-players')!;
-const searchEl = h('input', { type: 'search', placeholder: 'Search names' });
+const searchEl = h('input', { type: 'search', placeholder: 'Search names or IPs' });
 const sortEl = h('select', {},
   h('option', { value: 'seen' }, 'Last seen'),
   h('option', { value: 'created' }, 'Newest'),
@@ -59,10 +59,43 @@ async function load(more: boolean): Promise<void> {
       { title: 'Games', cell: (p) => p.games, num: true },
       { title: 'Best round', cell: (p) => p.bestRound, num: true },
       { title: 'Kills', cell: (p) => p.kills, num: true },
+      { title: 'Device', cell: (p) => (p.platform ? `${PLATFORMS[p.platform] ?? p.platform}${p.device ? ` · ${p.device}` : ''}` : null) },
+      { title: 'IP', cell: (p) => p.lastIp },
     ], rows, (p) => (location.hash = `#players/${p.id}`), 'No players found'));
   } catch (e) {
     if (!(e instanceof AuthError)) toast((e as Error).message, 'bad');
   }
+}
+
+const PLATFORMS: Record<string, string> = { web: 'Web', ios: 'iOS app', android: 'Android app' };
+/** Labels for the client's `details`; unknown keys show as sent. */
+const DETAILS: Record<string, string> = {
+  screen: 'Screen', pixelRatio: 'Pixel ratio', viewport: 'Window', language: 'Language', timeZone: 'Time zone',
+  cores: 'CPU cores', memoryGb: 'Memory (GB)', touch: 'Touch', network: 'Network', standalone: 'Installed (PWA)',
+};
+
+/** Clicking an address lists every player seen there. */
+function searchFor(text: string): void {
+  searchEl.value = text;
+  void load(false);
+}
+
+function deviceCard(dv: PlayerDevice): HTMLElement {
+  const facts: [string, string | null][] = [
+    ['Platform', PLATFORMS[dv.platform] ?? dv.platform],
+    ['Model', dv.model],
+    ['OS', dv.os],
+    ['Browser', dv.browser],
+    ['Last IP', dv.ip],
+    ['First seen', when(dv.firstSeenAt)],
+    ['Last seen', `${ago(dv.lastSeenAt)} (${when(dv.lastSeenAt)})`],
+    ...Object.entries(dv.details).map(([k, v]): [string, string | null] => [DETAILS[k] ?? k, v === null ? null : String(v)]),
+    ['User agent', dv.userAgent],
+    ['Device id', dv.deviceId],
+  ];
+  return h('dl', { class: 'facts-list' },
+    ...facts.filter(([, v]) => v !== null && v !== '').flatMap(([k, v]) => [h('dt', {}, k),
+      h('dd', { class: k === 'User agent' || k === 'Device id' || k === 'Last IP' ? 'mono' : '' }, v!)]));
 }
 
 async function openPlayer(id: string): Promise<void> {
@@ -78,7 +111,18 @@ async function openPlayer(id: string): Promise<void> {
         h('dt', {}, 'Games'), h('dd', {}, num(p.games)),
         h('dt', {}, 'Best round'), h('dd', {}, String(p.bestRound)),
         h('dt', {}, 'Total kills'), h('dd', {}, num(p.kills)),
+        h('dt', {}, 'Last IP'), h('dd', { class: 'mono' }, p.lastIp ?? '—'),
+        h('dt', {}, 'Signed up from'), h('dd', { class: 'mono' }, d.createdIp ?? '—'),
         h('dt', {}, 'Player id'), h('dd', { class: 'mono' }, p.id)),
+      h('h3', {}, `Devices (${d.devices.length})`),
+      ...(d.devices.length ? d.devices.map(deviceCard) : [h('p', { class: 'hint' }, 'None reported yet.')]),
+      h('h3', {}, `IP addresses (${d.ips.length})`),
+      table<PlayerIp>([
+        { title: 'Address', cell: (i) => h('span', { class: 'mono' }, i.ip) },
+        { title: 'First seen', cell: (i) => when(i.firstSeenAt) },
+        { title: 'Last seen', cell: (i) => ago(i.lastSeenAt) },
+        { title: 'Other players', cell: (i) => i.otherPlayers, num: true },
+      ], d.ips, (i) => searchFor(i.ip), 'None recorded yet'),
       h('h3', {}, `Games (latest ${d.games.length})`),
       table<PlayerGame>([
         { title: 'Started', cell: (g) => when(g.startedAt) },

@@ -79,7 +79,7 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
             return;
         }
         connections.put(session.getId(), conn);
-        activity.seenLater(account(session));
+        activity.seenLater(account(session), (String) session.getAttributes().get(TokenHandshakeInterceptor.IP));
         inbound(() -> lobby.connected(account(session), conn));
     }
 
@@ -105,7 +105,7 @@ public class GameSocketHandler extends TextWebSocketHandler implements Disposabl
         }
         SocketConnection conn = connections.remove(session.getId());
         if (conn != null) {
-            activity.seenLater(account(session));
+            activity.seenLater(account(session), (String) session.getAttributes().get(TokenHandshakeInterceptor.IP));
             inbound(() -> lobby.disconnected(account(session), conn));
         }
     }

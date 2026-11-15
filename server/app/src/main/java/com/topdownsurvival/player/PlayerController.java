@@ -1,5 +1,6 @@
 package com.topdownsurvival.player;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -39,9 +40,10 @@ public class PlayerController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public PlayerCreated create(@Valid @RequestBody NameRequest req) {
+    public PlayerCreated create(@Valid @RequestBody NameRequest req, HttpServletRequest request) {
         String token = auth.newToken();
         Player p = players.save(new Player(req.name(), auth.hash(token)));
+        activity.registered(p.getId(), request.getRemoteAddr());
         return new PlayerCreated(p.getId(), p.getName(), token);
     }
 
@@ -56,10 +58,15 @@ public class PlayerController {
         return new PlayerView(p.getId(), p.getName());
     }
 
-    /** The app's heartbeat while it's open, so the admin portal can show who's online. */
+    /**
+     * The app's heartbeat while it's open, so the admin portal can show who's online, from where and
+     * on what. The body (the device) is optional.
+     */
     @PostMapping("/me/seen")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void seen(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-        activity.seen(auth.require(authorization).getId());
+    public void seen(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent,
+            @RequestBody(required = false) PlayerActivity.DeviceReport device, HttpServletRequest request) {
+        activity.seen(auth.require(authorization).getId(), request.getRemoteAddr(), userAgent, device);
     }
 }
