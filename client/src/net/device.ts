@@ -64,12 +64,38 @@ function modelOf(ua: string): string | null {
   return null;
 }
 
+/**
+ * What a native shell knows that a WebView's user agent doesn't (the exact model, the real OS on an
+ * iPad, the WebView version). The mobile app sets it from Capacitor before the first heartbeat;
+ * its fields win over the ones parsed from the user agent. `details` is read on every beat.
+ */
+export interface NativeDevice {
+  deviceId?: string;
+  os?: string;
+  browser?: string;
+  model?: string;
+  details?: () => DeviceReport['details'];
+}
+
+let native: NativeDevice = {};
 let cached: DeviceReport | null = null;
+
+export function setNativeDevice(info: NativeDevice): void {
+  native = info;
+  cached = null;
+}
 
 export function deviceReport(): DeviceReport {
   const ua = navigator.userAgent;
   const nav = navigator as Navigator & { deviceMemory?: number; connection?: { effectiveType?: string } };
-  cached ??= { deviceId: deviceId(), platform: platform(), os: osOf(ua), browser: browserOf(ua), model: modelOf(ua), details: {} };
+  cached ??= {
+    deviceId: native.deviceId || deviceId(),
+    platform: platform(),
+    os: native.os ?? osOf(ua),
+    browser: native.browser ?? browserOf(ua),
+    model: native.model ?? modelOf(ua),
+    details: {},
+  };
   // The rest can change while the app is open (rotation, window size, network).
   cached.details = {
     screen: `${screen.width}x${screen.height}`,
@@ -82,6 +108,7 @@ export function deviceReport(): DeviceReport {
     touch: navigator.maxTouchPoints > 0,
     network: nav.connection?.effectiveType ?? null,
     standalone: matchMedia('(display-mode: standalone)').matches,
+    ...native.details?.(),
   };
   return cached;
 }

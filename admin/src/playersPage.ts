@@ -72,6 +72,7 @@ const PLATFORMS: Record<string, string> = { web: 'Web', ios: 'iOS app', android:
 const DETAILS: Record<string, string> = {
   screen: 'Screen', pixelRatio: 'Pixel ratio', viewport: 'Window', language: 'Language', timeZone: 'Time zone',
   cores: 'CPU cores', memoryGb: 'Memory (GB)', touch: 'Touch', network: 'Network', standalone: 'Installed (PWA)',
+  appVersion: 'App version', androidSdk: 'Android SDK', emulator: 'Emulator',
 };
 
 /** Clicking an address lists every player seen there. */

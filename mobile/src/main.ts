@@ -2,7 +2,7 @@ import { Game, VIEW_H, VIEW_W } from '../../client/src/core/Game';
 import { fetchMap, fetchMaps } from '../../client/src/net/api';
 import { Connection } from '../../client/src/net/Connection';
 import { controlText } from '../../client/src/ui/keys';
-import { setupNative } from './native';
+import { describeDevice, setupNative } from './native';
 import { TouchInput } from './TouchInput';
 
 const DEFAULT_MAP = 'house';
@@ -63,6 +63,7 @@ async function boot(): Promise<void> {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && game.state === 'playing') game.pause();
     });
+    await describeDevice();
     game.start();
     drawLoop();
   } catch (e) {
