@@ -369,7 +369,7 @@ export class Menu {
       shadowText(ctx, 'Ask the host for their room code.', cx, 200, '16px monospace', '#c8c8c8', 'center', 'middle');
     } else if (this.page === 'lobby') {
       drawLobby(ctx, game);
-    } else if (this.page === 'main' && this.mode === 'pause' && game.room) {
+    } else if (this.page === 'main' && this.mode === 'pause' && game.room && !game.room.solo) {
       shadowText(ctx, 'The game keeps running', cx, 190, '15px monospace', '#c8c8c8', 'center', 'middle');
     }
     const notice = this.loading && game.link.problem ? `${game.link.problem}. Retrying…` : this.notice;
