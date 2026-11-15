@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -249,7 +250,9 @@ public class AdminController {
                         instant(rs, 5), instant(rs, 6), rs.getString(7), (Integer) rs.getObject(8), rs.getInt(9), rs.getInt(10),
                         instant(rs, 11)))
                 .list();
-        String createdIp = db.sql("SELECT created_ip FROM players WHERE id = ?").param(id).query(String.class).single();
+        // Null for players from before addresses were recorded, and single() rejects a null value.
+        String createdIp = db.sql("SELECT created_ip FROM players WHERE id = ?").param(id)
+                .query((rs, _) -> Optional.ofNullable(rs.getString(1))).single().orElse(null);
         List<PlayerDevice> devices = db.sql("""
                 SELECT device_id, platform, os, browser, model, user_agent, ip, details::text, first_seen_at, last_seen_at
                 FROM player_devices WHERE player_id = ? ORDER BY last_seen_at DESC""")
