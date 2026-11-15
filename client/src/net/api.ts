@@ -14,6 +14,7 @@ export const NAME_MAX = 20;
 /**
  * `token` is missing until the server has registered the name (it may have been unreachable), or,
  * for an account, once the server has signed this device out (log in again). Guests have no `email`.
+ * `verified`: the account has typed the code it was emailed; until then it plays under guest rules.
  */
 export interface Identity {
   name: string;
@@ -21,6 +22,7 @@ export interface Identity {
   token?: string;
   account?: boolean;
   email?: string;
+  verified?: boolean;
 }
 
 /** What account calls resolve to: null when it worked, otherwise a message to show. */
@@ -74,15 +76,27 @@ export function isAccount(): boolean {
   return loadIdentity()?.account === true;
 }
 
+/** An account that hasn't verified its email yet, so it's kept to the guest rules. */
+export function needsVerifying(): boolean {
+  const id = loadIdentity();
+  return id?.account === true && !!id.token && id.verified !== true;
+}
+
+/** Plays without the guest limits: a verified account. */
+export function unlocked(): boolean {
+  const id = loadIdentity();
+  return id?.account === true && id.verified === true;
+}
+
 /** An account this device has been signed out of (by a password change elsewhere): it needs to log in again. */
 export function needsLogin(): boolean {
   const id = loadIdentity();
   return id?.account === true && !id.token;
 }
 
-/** Whether this player may start this map: guests only play guest maps, solo. */
+/** Whether this player may start this map: guests and unverified accounts only play guest maps, solo. */
 export function canPlay(map: MapSummary | undefined, solo: boolean): boolean {
-  return isAccount() || (solo && map?.guest === true);
+  return unlocked() || (solo && map?.guest === true);
 }
 
 /** A failed request; `status` is 0 when the server didn't answer. `message` is the server's, when it gave one. */
@@ -135,6 +149,7 @@ interface SignedIn {
   name: string;
   token: string;
   account: boolean;
+  verified: boolean;
 }
 
 /**
@@ -175,7 +190,7 @@ export async function register(email: string, username: string, password: string
   try {
     const guestToken = current && !current.account ? current.token : undefined;
     const r = await request<SignedIn>('POST', '/players/register', { email, username, password }, guestToken);
-    saveIdentity({ name: r.name, playerId: r.playerId, token: r.token, account: true, email: email.trim().toLowerCase() });
+    saveIdentity({ name: r.name, playerId: r.playerId, token: r.token, account: true, email: email.trim().toLowerCase(), verified: r.verified });
     return null;
   } catch (e) {
     return problem(e);
@@ -186,7 +201,7 @@ export async function register(email: string, username: string, password: string
 export async function login(email: string, password: string): Promise<Outcome> {
   try {
     const r = await request<SignedIn>('POST', '/players/login', { email, password });
-    saveIdentity({ name: r.name, playerId: r.playerId, token: r.token, account: true, email: email.trim().toLowerCase() });
+    saveIdentity({ name: r.name, playerId: r.playerId, token: r.token, account: true, email: email.trim().toLowerCase(), verified: r.verified });
     return null;
   } catch (e) {
     return problem(e);
@@ -198,6 +213,31 @@ export async function logout(): Promise<void> {
   const token = loadIdentity()?.token;
   saveIdentity(null);
   if (token) await request('POST', '/players/logout', undefined, token).catch(() => {});
+}
+
+/** Checks the code emailed to the account; marks this identity verified when it's right. */
+export async function verifyEmail(code: string): Promise<Outcome> {
+  const id = loadIdentity();
+  if (!id?.token) return 'Log in again';
+  try {
+    await request('POST', '/players/me/verify', { code }, id.token);
+    saveIdentity({ ...id, verified: true });
+    return null;
+  } catch (e) {
+    return problem(e);
+  }
+}
+
+/** Emails the account a new code. */
+export async function resendCode(): Promise<Outcome> {
+  const token = loadIdentity()?.token;
+  if (!token) return 'Log in again';
+  try {
+    await request('POST', '/players/me/verify/resend', undefined, token);
+    return null;
+  } catch (e) {
+    return problem(e);
+  }
 }
 
 export async function changePassword(current: string, password: string): Promise<Outcome> {
@@ -216,8 +256,8 @@ export async function refreshMe(): Promise<void> {
   const id = loadIdentity();
   if (!id?.token) return;
   try {
-    const me = await request<{ name: string; account: boolean; email: string | null }>('GET', '/players/me', undefined, id.token);
-    saveIdentity({ ...id, name: me.name, account: me.account, email: me.email ?? undefined });
+    const me = await request<{ name: string; account: boolean; email: string | null; verified: boolean }>('GET', '/players/me', undefined, id.token);
+    saveIdentity({ ...id, name: me.name, account: me.account, email: me.email ?? undefined, verified: me.verified });
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) tokenRejected(id);
   }

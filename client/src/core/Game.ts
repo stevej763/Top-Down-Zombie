@@ -183,8 +183,10 @@ export class Game {
     this.resumeBy = 0;
   }
 
-  /** After signing in, up or out (always from the title menu, with no socket open): the next room opens one with the new token. */
+  /** After signing in, up or out, or verifying the email (always from the title menu): the next room opens a socket with the new token. */
   identityChanged(): void {
+    // The server reads the guest limits when the socket opens, so drop one left open by a refused create.
+    if (!this.room && !this.asked) this.link.close();
     this.world = restingWorld(this.level, this.you, loadIdentity()?.name ?? '');
     void this.scores.refresh();
   }
