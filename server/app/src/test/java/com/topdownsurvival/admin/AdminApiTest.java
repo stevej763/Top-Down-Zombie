@@ -157,6 +157,41 @@ class AdminApiTest {
         assertThat(get("/api/admin/overview", root).body().get("online").asInt()).isPositive();
     }
 
+    @Test
+    void theHeartbeatRecordsAddressesAndDevices() throws Exception {
+        String root = login("root", "root-password");
+        JsonNode p = register("Gadget");
+        String id = p.get("playerId").asString();
+        String token = p.get("token").asString();
+        String device = """
+                {"deviceId":"dev-1","platform":"ios","os":"iOS 18.1","browser":"WebView","model":"iPhone",
+                 "details":{"screen":"390x844","touch":true}}""";
+        assertThat(call("POST", "/api/players/me/seen", null, device, false, token).status()).isEqualTo(204);
+        // An unknown platform is stored as web; a body with no device id records nothing more.
+        assertThat(call("POST", "/api/players/me/seen", null, "{\"deviceId\":\"dev-2\",\"platform\":\"toaster\"}", false, token)
+                .status()).isEqualTo(204);
+        assertThat(call("POST", "/api/players/me/seen", null, "{}", false, token).status()).isEqualTo(204);
+
+        JsonNode d = get("/api/admin/players/" + id, root).body();
+        assertThat(d.get("createdIp").asString()).isNotBlank();
+        assertThat(d.get("player").get("lastIp").asString()).isEqualTo(d.get("createdIp").asString());
+        assertThat(d.get("ips")).hasSize(1);
+        assertThat(d.get("devices")).hasSize(2);
+        JsonNode phone = d.get("devices").get(1);
+        assertThat(phone.get("deviceId").asString()).isEqualTo("dev-1");
+        assertThat(phone.get("platform").asString()).isEqualTo("ios");
+        assertThat(phone.get("model").asString()).isEqualTo("iPhone");
+        assertThat(phone.get("details").get("screen").asString()).isEqualTo("390x844");
+        assertThat(phone.get("userAgent").asString()).isNotBlank();
+        assertThat(d.get("devices").get(0).get("platform").asString()).isEqualTo("web");
+
+        // The list shows the latest device, and the search finds players by address.
+        JsonNode page = get("/api/admin/players?q=" + d.get("createdIp").asString(), root).body();
+        assertThat(page.get("total").asInt()).isPositive();
+        assertThat(get("/api/admin/players?q=Gadget", root).body().get("players").get(0).get("platform").asString())
+                .isEqualTo("web");
+    }
+
     private boolean onlineFlag(String cookie, String name) throws Exception {
         JsonNode page = get("/api/admin/players?q=" + name, cookie).body();
         assertThat(page.get("total").asInt()).isEqualTo(1);
