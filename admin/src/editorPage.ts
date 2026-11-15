@@ -1,6 +1,7 @@
 import type { MapDoc } from '../../client/src/game/MapData';
 import { TILE } from '../../client/src/game/TileMap';
-import { AuthError, listMaps, loadMap, saveMap, SaveError, writeRepoFile } from './api';
+import { AuthError, loadMap, saveMap, SaveError, writeRepoFile } from './api';
+import { loadStored } from '../../client/src/core/storage';
 import { h, modal, toast } from './dom';
 import { Editor } from './editor';
 import { formatMap } from './format';
@@ -24,22 +25,56 @@ let shown = -1;
 /** The editor is one page of the portal; hidden, it neither draws nor takes keys. */
 let active = false;
 
-let fitted = false;
+/** Fit the map once the stage has a size: maps can be loaded while the editor is hidden. */
+let needsFit = true;
 
 /** Call after the page is shown (so the stage has a size) or hidden. */
 export function setEditorActive(on: boolean): void {
   if (on && !active) {
     active = true;
     shown = -1;
-    if (!fitted) {
-      fitted = true;
-      fit();
-    }
+    if (needsFit) fit();
     requestAnimationFrame(frame);
   }
   active = on;
 }
-const editor = new Editor(Editor.savedDraft() ?? starterDraft('new-map', 'New Map', 40, 30, true), () => {});
+const restored = Editor.savedDraft();
+const editor = new Editor(restored ?? starterDraft('new-map', 'New Map', 40, 30, true), () => {});
+
+// ------------------------------------------------------------------ unsaved changes
+
+const BASELINE_KEY = 'top-down-survival-admin-draft-baseline';
+const docText = () => JSON.stringify(toDoc(editor.draft));
+/** The draft as last opened or saved, to tell whether there's anything to lose. */
+let baseline = (restored && loadStored(BASELINE_KEY)) || docText();
+
+function markClean(): void {
+  baseline = docText();
+  try {
+    localStorage.setItem(BASELINE_KEY, baseline);
+  } catch {
+    // Not kept across reloads, then.
+  }
+}
+
+export const isDirty = () => docText() !== baseline;
+export const draftName = () => editor.draft.name || editor.draft.id;
+export const draftId = () => editor.draft.id;
+
+/** True if there are no unsaved changes, or you said to throw them away. */
+async function confirmDiscard(): Promise<boolean> {
+  if (!isDirty()) return true;
+  const res = await modal('Discard unsaved changes?', h('p', {}, `${draftName()} has changes that haven't been saved to the server or the repo.`),
+    ['Discard', 'Cancel']);
+  return res === 'Discard';
+}
+
+function loadDraft(d: Draft): void {
+  editor.load(d);
+  markClean();
+  if (active) fit();
+  else needsFit = true;
+}
 
 /** A new map, optionally with one walled room in the middle to start from. */
 function starterDraft(id: string, name: string, w: number, h: number, room: boolean): Draft {
@@ -104,6 +139,8 @@ resizeCanvas();
 
 function fit(): void {
   const r = stage.getBoundingClientRect();
+  if (!r.width) return;
+  needsFit = false;
   view.fit(editor.draft, r.width, r.height);
 }
 
@@ -235,7 +272,9 @@ window.addEventListener('keyup', (ev) => {
 
 // ------------------------------------------------------------------ actions
 
-async function newMap(): Promise<void> {
+/** Returns whether a map was created. */
+export async function newMap(): Promise<boolean> {
+  if (!(await confirmDiscard())) return false;
   const id = h('input', { type: 'text', value: 'new-map' });
   const name = h('input', { type: 'text', value: 'New Map', maxlength: 40 });
   const w = h('input', { type: 'number', min: 10, max: 200, value: 46 });
@@ -248,51 +287,40 @@ async function newMap(): Promise<void> {
     h('div', { class: 'row' }, h('label', {}, ''), h('label', {}, room, ' Start with a walled room')),
     h('p', { class: 'hint' }, 'The House is 46×32 and The Farmstead 64×40. Leave a few tiles of yard round the buildings for zombies to come from.'),
   ], ['Create', 'Cancel']);
-  if (ok !== 'Create') return;
+  if (ok !== 'Create') return false;
   const cw = Math.max(10, Math.min(200, Number(w.value) || 46));
   const ch = Math.max(10, Math.min(200, Number(hh.value) || 32));
-  editor.load(starterDraft(id.value.trim() || 'new-map', name.value || 'New Map', cw, ch, room.checked));
-  fit();
+  loadDraft(starterDraft(id.value.trim() || 'new-map', name.value || 'New Map', cw, ch, room.checked));
+  location.hash = '#maps/edit';
+  return true;
 }
 
-async function openMap(): Promise<void> {
-  let maps;
+/**
+ * Open a map from the server. The draft is kept if it's already this map with unsaved changes (so an
+ * edit survives a trip to another tab). Returns false if you kept another map's changes instead.
+ */
+export async function openMapById(id: string): Promise<boolean> {
+  if (editor.draft.id === id && isDirty()) return true;
+  if (!(await confirmDiscard())) return false;
   try {
-    maps = await listMaps();
-  } catch (e) {
-    toast(`Couldn't reach the server: ${(e as Error).message}`, 'bad');
-    return;
-  }
-  const list = h('div', { class: 'list' });
-  const pick = new Promise<string | null>((resolve) => {
-    for (const m of maps) {
-      list.append(h('button', { onclick: () => { resolve(m.id); (document.getElementById('modal') as HTMLDialogElement).close(); } },
-        h('span', {}, m.name), h('span', { class: 'hint' }, `${m.id} · v${m.version}`)));
-    }
-    void modal('Open map', [list, h('p', { class: 'hint' }, 'Maps the server has: the repo\'s maps/*.json plus any uploaded.')], ['Cancel']).then(() => resolve(null));
-  });
-  const id = await pick;
-  if (!id) return;
-  try {
-    editor.load(draftFromDoc(await loadMap(id)));
-    fit();
-    toast(`Opened ${id}`);
+    loadDraft(draftFromDoc(await loadMap(id)));
   } catch (e) {
     toast((e as Error).message, 'bad');
   }
+  return true;
 }
 
-function importFile(): void {
+export function importFile(): void {
   fileInput.value = '';
   fileInput.click();
 }
 
 fileInput.addEventListener('change', async () => {
   const file = fileInput.files?.[0];
-  if (!file) return;
+  if (!file || !(await confirmDiscard())) return;
   try {
-    editor.load(draftFromDoc(JSON.parse(await file.text()) as MapDoc));
-    fit();
+    loadDraft(draftFromDoc(JSON.parse(await file.text()) as MapDoc));
+    location.hash = '#maps/edit';
     toast(`Imported ${file.name}`);
   } catch (e) {
     toast(`Not a map file: ${(e as Error).message}`, 'bad');
@@ -321,6 +349,7 @@ async function saveToServer(): Promise<void> {
   const doc = toDoc(editor.draft);
   try {
     const saved = await saveMap(doc, JSON.stringify(doc));
+    markClean();
     // Repo files are re-seeded on every server start and win over uploads.
     const note = import.meta.env.DEV ? ` If maps/${saved.id}.json exists, it replaces this when the server restarts: use Write to repo to keep it.` : '';
     toast(`Saved ${saved.name} (${saved.id} v${saved.version}) to the server.${note}`, 'good');
@@ -340,6 +369,7 @@ async function saveToRepo(): Promise<void> {
   const doc = toDoc(editor.draft);
   try {
     const path = await writeRepoFile(doc.id, formatMap(doc));
+    markClean();
     toast(`Wrote ${path}. Restart the server to load it, and run npm run render-maps in client/ for the preview.`, 'good');
   } catch (e) {
     toast(`Write failed: ${(e as Error).message}`, 'bad');
@@ -348,7 +378,6 @@ async function saveToRepo(): Promise<void> {
 
 const actions: Record<string, () => void> = {
   new: () => void newMap(),
-  open: () => void openMap(),
   import: importFile,
   download,
   undo: () => editor.undo(),
