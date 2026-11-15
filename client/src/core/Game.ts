@@ -375,8 +375,10 @@ export class Game {
     this.result = m;
     sound.gameOver();
     const mine = m.players.find((p) => p.id === this.you);
-    if (this.room) this.scores.show(this.room.mapId);
-    this.scores.lastRank = mine?.rank ?? -1;
+    if (this.room) {
+      this.scores.show(this.room.mapId);
+      this.scores.recordRank(this.room.mapId, mine?.rank ?? -1);
+    }
   }
 
   /** Solo: a new game in the same room. Co-op: back to the lobby to ready up again. */

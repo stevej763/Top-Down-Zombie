@@ -60,6 +60,9 @@ export class Menu {
   private notice = '';
   /** Waiting for the server to answer a create or join; ignore further picks. */
   private loading = false;
+  /** High scores: the map arrow under the pointer (0 left, 1 right, -1 none), and when each was last used. */
+  private arrowHover = -1;
+  private arrowUsedAt = [0, 0];
 
   open(mode: MenuMode): void {
     this.mode = mode;
@@ -148,7 +151,14 @@ export class Menu {
     if (n <= 1) return;
     const i = game.maps.findIndex((m) => m.id === game.scores.mapId);
     game.scores.show(game.maps[(i + dir + n) % n].id);
+    this.arrowUsedAt[dir < 0 ? 0 : 1] = performance.now();
     sound.menuMove();
+  }
+
+  private openScores(game: Game): void {
+    this.go('scores');
+    game.scores.prefetch(game.maps.map((m) => m.id));
+    game.scores.show(game.mapId);
   }
 
   private openName(then: 'play' | 'join' | 'back'): void {
@@ -185,7 +195,7 @@ export class Menu {
           ...(this.mode === 'title'
             ? [
               { type: 'button', label: 'Join Game', run: () => this.openJoin() },
-              { type: 'button', label: 'High Scores', run: () => { this.go('scores'); game.scores.show(game.mapId); } },
+              { type: 'button', label: 'High Scores', run: () => this.openScores(game) },
               { type: 'button', label: 'Player Name', run: () => this.openName('back') },
             ] as Item[]
             : []),
@@ -282,14 +292,17 @@ export class Menu {
     const m = inp.mouse;
     const moved = m.x !== this.lastMouse.x || m.y !== this.lastMouse.y;
     this.lastMouse = { x: m.x, y: m.y };
-    const hover = rects.findIndex((r) => m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h);
+    const hover = rects.findIndex((r) => inside(m, r));
     if (hover >= 0 && hover !== this.index && (moved || inp.mousePressed)) {
       this.index = hover;
       sound.menuMove();
     }
 
     if (this.page === 'scores') {
-      const dir = (inp.wasPressed('ArrowRight', 'KeyD') ? 1 : 0) - (inp.wasPressed('ArrowLeft', 'KeyA') ? 1 : 0);
+      // The arrows aren't menu items, so Back stays selected for Enter and Esc. Taps on mobile arrive as clicks.
+      this.arrowHover = scoreArrows(game).findIndex((r) => inside(m, r));
+      const click = inp.mousePressed && this.arrowHover >= 0 ? this.arrowHover * 2 - 1 : 0;
+      const dir = click || (inp.wasPressed('ArrowRight', 'KeyD') ? 1 : 0) - (inp.wasPressed('ArrowLeft', 'KeyA') ? 1 : 0);
       if (dir) this.cycleScoresMap(game, dir);
     }
 
@@ -341,9 +354,12 @@ export class Menu {
       }
       if (parts.length) shadowText(ctx, parts.join('   ·   '), cx, 548, '15px monospace', '#a0a0a0', 'center', 'middle');
     } else {
-      shadowText(ctx, TITLES[this.page], cx, this.page === 'main' ? 140 : 95, `${this.page === 'main' ? 64 : 52}px ${DISPLAY_FONT}`, '#e0e0e0', 'center', 'middle');
+      shadowText(ctx, TITLES[this.page], cx, this.page === 'main' ? 140 : this.page === 'scores' ? 78 : 95, `${this.page === 'main' ? 64 : 52}px ${DISPLAY_FONT}`, '#e0e0e0', 'center', 'middle');
     }
-    if (this.page === 'scores') drawScores(ctx, game);
+    if (this.page === 'scores') {
+      const now = performance.now();
+      drawScores(ctx, game, [0, 1].map((i) => i === this.arrowHover || now - this.arrowUsedAt[i] < ARROW_FLASH_MS));
+    }
     else if (this.page === 'name') {
       shadowText(ctx, 'Shown on the online high scores.', cx, 200, '16px monospace', '#c8c8c8', 'center', 'middle');
     } else if (this.page === 'mode') {
@@ -489,33 +505,58 @@ function drawItem(ctx: CanvasRenderingContext2D, it: Item, r: Rect, sel: boolean
 
 interface Column { x: number; label: string; align?: CanvasTextAlign }
 
-const SCORE_TABLE = { x: 120, w: 720 };
+const SCORE_TABLE = { x: 120, y: 160, w: 720, h: 335 };
+const SCORE_ROW_H = 28;
 const SCORE_COLS: Column[] = [
   { x: 160, label: '#' }, { x: 200, label: 'NAME', align: 'left' }, { x: 470, label: 'ROUNDS' },
   { x: 560, label: 'KILLS' }, { x: 660, label: 'POINTS' }, { x: 770, label: 'DATE' },
 ];
+/** The map arrows either side of the table: tall, so they're easy to hit with a thumb. */
+const SCORE_ARROW = { w: 56, h: 150, gap: 12 };
+const ARROW_FLASH_MS = 150;
 
-function drawScores(ctx: CanvasRenderingContext2D, game: Game): void {
+/** Hit areas for the previous/next map arrows (none with only one map); used by update and draw. */
+function scoreArrows(game: Game): Rect[] {
+  if (game.maps.length <= 1) return [];
+  const { x, y, w, h } = SCORE_TABLE;
+  const { w: aw, h: ah, gap } = SCORE_ARROW;
+  const ay = y + (h - ah) / 2;
+  return [{ x: x - gap - aw, y: ay, w: aw, h: ah }, { x: x + w + gap, y: ay, w: aw, h: ah }];
+}
+
+function inside(p: { x: number; y: number }, r: Rect): boolean {
+  return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+}
+
+function drawScores(ctx: CanvasRenderingContext2D, game: Game, lit: boolean[]): void {
   const board = game.scores;
-  const { x, w } = SCORE_TABLE;
+  const { x, y: top, w, h } = SCORE_TABLE;
+  const cx = VIEW_W / 2;
   const cols = SCORE_COLS;
-  const top = 145;
-  const status = board.loading ? 'Loading…' : board.online ? 'Online leaderboard' : "Can't reach the server";
   const mapName = game.maps.find((m) => m.id === board.mapId)?.name ?? board.mapId;
-  const label = game.maps.length > 1 ? `◀  ${mapName}  ▶` : mapName;
-  shadowText(ctx, `${label}   ·   ${status}`, VIEW_W / 2, 130, '14px monospace', '#9a9a9a', 'center', 'middle');
+  shadowText(ctx, mapName, cx, 122, `24px ${DISPLAY_FONT}`, '#ffffff', 'center', 'middle');
+  // A refresh behind a table that's already showing stays quiet.
+  const status = board.loading && !board.loaded ? 'Loading…' : board.online ? 'Online leaderboard' : "Can't reach the server";
+  const dots = game.maps.length > 1 ? game.maps.map((m) => (m.id === board.mapId ? '●' : '○')).join(' ') + '   ' : '';
+  shadowText(ctx, dots + status, cx, 145, '14px monospace', '#9a9a9a', 'center', 'middle');
+
+  scoreArrows(game).forEach((r, i) => drawArrow(ctx, r, i === 0 ? -1 : 1, lit[i]));
+
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(x, top, w, 350);
-  cols.forEach((c) => shadowText(ctx, c.label, c.x, top + 22, 'bold 13px monospace', '#7a7a7a', c.align ?? 'center', 'middle'));
+  ctx.fillRect(x, top, w, h);
+  cols.forEach((c) => shadowText(ctx, c.label, c.x, top + 20, 'bold 13px monospace', '#7a7a7a', c.align ?? 'center', 'middle'));
 
   if (board.entries.length === 0) {
-    const empty = board.online || board.loading ? 'No runs yet. Grab a hammer.' : 'High scores are kept on the server.';
-    shadowText(ctx, empty, VIEW_W / 2, top + 170, '16px monospace', '#a0a0a0', 'center', 'middle');
+    // Until a map's table first arrives, say so rather than claim it's empty.
+    const empty = !board.loaded
+      ? board.loading ? 'Loading…' : 'High scores are kept on the server.'
+      : 'No runs yet. Grab a hammer.';
+    shadowText(ctx, empty, cx, top + h / 2, '16px monospace', '#a0a0a0', 'center', 'middle');
     return;
   }
   for (let i = 0; i < MAX_SCORES; i++) {
     const s = board.entries[i];
-    const y = top + 56 + i * 29;
+    const y = top + 50 + i * SCORE_ROW_H;
     if (!s) {
       shadowText(ctx, `${i + 1}`, cols[0].x, y, '16px monospace', '#444', 'center', 'middle');
       continue;
@@ -526,6 +567,25 @@ function drawScores(ctx: CanvasRenderingContext2D, game: Game): void {
     const values = [`${i + 1}`, name, `${s.round}`, `${s.kills}`, s.points ? `${s.points}` : '—', date];
     values.forEach((v, c) => shadowText(ctx, v, cols[c].x, y, '16px monospace', color, cols[c].align ?? 'center', 'middle'));
   }
+}
+
+/** A previous (dir -1) or next (dir 1) arrow panel, in the menu buttons' style. */
+function drawArrow(ctx: CanvasRenderingContext2D, r: Rect, dir: number, lit: boolean): void {
+  ctx.fillStyle = lit ? 'rgba(140, 16, 16, 0.9)' : 'rgba(12, 12, 12, 0.72)';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = lit ? '#e04848' : 'rgba(255, 255, 255, 0.12)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+  const mx = r.x + r.w / 2;
+  const my = r.y + r.h / 2;
+  const s = r.w * 0.22;
+  ctx.fillStyle = lit ? '#ffffff' : '#c8c8c8';
+  ctx.beginPath();
+  ctx.moveTo(mx + dir * s, my);
+  ctx.lineTo(mx - dir * s, my - s * 1.4);
+  ctx.lineTo(mx - dir * s, my + s * 1.4);
+  ctx.closePath();
+  ctx.fill();
 }
 
 /** GameRoom.MAX_PLAYERS. */
