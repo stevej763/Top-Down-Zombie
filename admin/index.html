@@ -7,31 +7,42 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <header id="top">
-      <div class="brand">TOP DOWN SURVIVAL <span>admin · maps</span></div>
-      <div class="group">
-        <button data-act="new" title="New map">New</button>
-        <button data-act="open" title="Open a map from the server">Open</button>
-        <button data-act="import" title="Open a .json file">Import</button>
-        <button data-act="download" title="Download the map as JSON">Download</button>
-      </div>
-      <div class="group">
-        <button data-act="undo" title="Undo (Ctrl+Z)">Undo</button>
-        <button data-act="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
-      </div>
-      <div class="group">
-        <button data-act="grid" class="toggle" title="Tile grid">Grid</button>
-        <button data-act="rooms" class="toggle" title="Room areas, names and window directions">Rooms</button>
-        <button data-act="clean" class="toggle" title="Hide editor overlays (C)">Clean</button>
-        <button data-act="fit" title="Fit the map to the window (F)">Fit</button>
+    <div id="login" hidden></div>
+    <header id="top" hidden>
+      <div class="brand">TOP DOWN SURVIVAL <span>admin</span></div>
+      <nav id="tabs">
+        <a href="#live">Live</a>
+        <a href="#games">Games</a>
+        <a href="#players">Players</a>
+        <a href="#maps">Maps</a>
+        <a href="#admins">Admins</a>
+      </nav>
+      <div id="maps-actions" class="group-row" hidden>
+        <div class="group">
+          <button data-act="new" title="New map">New</button>
+          <button data-act="open" title="Open a map from the server">Open</button>
+          <button data-act="import" title="Open a .json file">Import</button>
+          <button data-act="download" title="Download the map as JSON">Download</button>
+        </div>
+        <div class="group">
+          <button data-act="undo" title="Undo (Ctrl+Z)">Undo</button>
+          <button data-act="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+        </div>
+        <div class="group">
+          <button data-act="grid" class="toggle" title="Tile grid">Grid</button>
+          <button data-act="rooms" class="toggle" title="Room areas, names and window directions">Rooms</button>
+          <button data-act="clean" class="toggle" title="Hide editor overlays (C)">Clean</button>
+          <button data-act="fit" title="Fit the map to the window (F)">Fit</button>
+        </div>
+        <div class="group">
+          <button data-act="repo" class="dev-only" title="Write maps/&lt;id&gt;.json in the repo (dev server only)">Write to repo</button>
+          <button data-act="save" class="primary" title="PUT /api/maps/&lt;id&gt; (Ctrl+S)">Save to server</button>
+        </div>
       </div>
       <div class="spacer"></div>
-      <div class="group">
-        <button data-act="repo" class="dev-only" title="Write maps/&lt;id&gt;.json in the repo (dev server only)">Write to repo</button>
-        <button data-act="save" class="primary" title="PUT /api/maps/&lt;id&gt; (Ctrl+S)">Save to server</button>
-      </div>
+      <div id="me" class="group"></div>
     </header>
-    <main>
+    <main id="page-maps" class="page" hidden>
       <nav id="tools"></nav>
       <aside id="options"></aside>
       <div id="stage">
@@ -40,6 +51,10 @@
       </div>
       <aside id="side"></aside>
     </main>
+    <main id="page-live" class="page dash" hidden></main>
+    <main id="page-games" class="page dash" hidden></main>
+    <main id="page-players" class="page dash" hidden></main>
+    <main id="page-admins" class="page dash" hidden></main>
     <dialog id="modal"></dialog>
     <div id="toast"></div>
     <input type="file" id="file" accept=".json,application/json" hidden />
