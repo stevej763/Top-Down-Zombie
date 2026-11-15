@@ -19,7 +19,8 @@ class LobbyServiceTest {
 
     final LobbyService lobby = new LobbyService(
             id -> id.equals("house") ? Optional.of(new LobbyService.RoomMap(FakeConnection.map("house"), 1)) : Optional.empty(),
-            (_, _, _, results) -> results.stream().map(_ -> 0).toList(),
+            (_, _, _, _, results) -> results.stream().map(_ -> 0).toList(),
+            GameRecorder.NONE,
             Runnable::run,
             tick -> {
                 ticks.add(tick);

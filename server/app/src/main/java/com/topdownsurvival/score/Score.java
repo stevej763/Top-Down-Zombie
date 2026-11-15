@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(name = "scores")
@@ -22,6 +23,10 @@ public class Score {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "player_id")
     private Player player;
+
+    /** The game it was scored in; null for scores from before games were recorded. */
+    @Column(name = "game_id")
+    private UUID gameId;
 
     @Column(name = "map_id", nullable = false)
     private String mapId;
@@ -43,8 +48,9 @@ public class Score {
 
     protected Score() {}
 
-    public Score(Player player, String mapId, int round, int kills, int points, int partySize) {
+    public Score(Player player, UUID gameId, String mapId, int round, int kills, int points, int partySize) {
         this.player = player;
+        this.gameId = gameId;
         this.mapId = mapId;
         this.round = round;
         this.kills = kills;

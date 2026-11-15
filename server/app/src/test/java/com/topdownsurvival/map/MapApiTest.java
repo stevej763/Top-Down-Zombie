@@ -19,7 +19,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "top-down-survival.admin-token=test-admin")
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT,
+        properties = {"top-down-survival.admin.username=maps-admin", "top-down-survival.admin.password=maps-password"})
 @Testcontainers
 class MapApiTest {
     @Container
@@ -34,11 +35,29 @@ class MapApiTest {
 
     record Res(int status, JsonNode body) {}
 
-    private Res call(String method, String path, String adminToken, String body) throws Exception {
+    private String session;
+
+    /** An admin session cookie, logged in once. */
+    private String admin() throws Exception {
+        if (session == null) {
+            var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/admin/login"))
+                    .header("Content-Type", "application/json").header("X-Requested-With", "admin")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"username\":\"maps-admin\",\"password\":\"maps-password\"}"))
+                    .build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            assertThat(res.statusCode()).isEqualTo(200);
+            session = res.headers().firstValue("Set-Cookie").orElseThrow().split(";")[0];
+        }
+        return session;
+    }
+
+    /** {@code cookie} is a whole Cookie header, or null to send none. */
+    private Res call(String method, String path, String cookie, String body) throws Exception {
         var req = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Content-Type", "application/json")
+                .header("X-Requested-With", "admin")
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
-        if (adminToken != null) req.header("X-Admin-Token", adminToken);
+        if (cookie != null) req.header("Cookie", cookie);
         HttpResponse<String> res = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
         return new Res(res.statusCode(), res.body().isEmpty() ? null : json.readTree(res.body()));
     }
@@ -67,22 +86,22 @@ class MapApiTest {
     }
 
     @Test
-    void uploadsNeedTheAdminToken() throws Exception {
+    void uploadsNeedAnAdminSession() throws Exception {
         String doc = farmsteadAs("shed", "Shed");
-        assertThat(call("PUT", "/api/maps/shed", null, doc).status()).isEqualTo(403);
-        assertThat(call("PUT", "/api/maps/shed", "wrong", doc).status()).isEqualTo(403);
+        assertThat(call("PUT", "/api/maps/shed", null, doc).status()).isEqualTo(401);
+        assertThat(call("PUT", "/api/maps/shed", "tds_admin=wrong", doc).status()).isEqualTo(401);
     }
 
     @Test
     void uploadCreatesThenVersionsOnlyOnChange() throws Exception {
-        Res first = call("PUT", "/api/maps/barn", "test-admin", farmsteadAs("barn", "Barn"));
+        Res first = call("PUT", "/api/maps/barn", admin(), farmsteadAs("barn", "Barn"));
         assertThat(first.status()).isEqualTo(200);
         assertThat(first.body().get("version").asInt()).isEqualTo(1);
 
-        Res same = call("PUT", "/api/maps/barn", "test-admin", farmsteadAs("barn", "Barn"));
+        Res same = call("PUT", "/api/maps/barn", admin(), farmsteadAs("barn", "Barn"));
         assertThat(same.body().get("version").asInt()).isEqualTo(1);
 
-        Res renamed = call("PUT", "/api/maps/barn", "test-admin", farmsteadAs("barn", "Big Barn"));
+        Res renamed = call("PUT", "/api/maps/barn", admin(), farmsteadAs("barn", "Big Barn"));
         assertThat(renamed.body().get("version").asInt()).isEqualTo(2);
         assertThat(call("GET", "/api/maps/barn", null, null).body().get("name").asString()).isEqualTo("Big Barn");
     }
@@ -90,11 +109,11 @@ class MapApiTest {
     @Test
     void invalidUploadsListTheProblems() throws Exception {
         String broken = farmsteadAs("broken", "Broken").replace("\"weapon\":\"shotgun\"", "\"weapon\":\"bazooka\"");
-        Res r = call("PUT", "/api/maps/broken", "test-admin", broken);
+        Res r = call("PUT", "/api/maps/broken", admin(), broken);
         assertThat(r.status()).isEqualTo(400);
         assertThat(r.body().get("problems").toString()).contains("bazooka");
 
-        assertThat(call("PUT", "/api/maps/other", "test-admin", farmsteadAs("broken", "X")).status()).isEqualTo(400);
-        assertThat(call("PUT", "/api/maps/junk", "test-admin", "{not json").status()).isEqualTo(400);
+        assertThat(call("PUT", "/api/maps/other", admin(), farmsteadAs("broken", "X")).status()).isEqualTo(400);
+        assertThat(call("PUT", "/api/maps/junk", admin(), "{not json").status()).isEqualTo(400);
     }
 }

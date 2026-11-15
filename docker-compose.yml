@@ -22,8 +22,9 @@ services:
       dockerfile: server/Dockerfile
     image: top-down-survival-server
     environment:
-      # Set in a .env file to enable PUT /api/maps/{id}.
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # Set in a .env file: the first admin portal account, created while there are none.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # The web dev server, then the mobile app's WebView origins (iOS, Android).
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,capacitor://localhost,https://localhost}
       DB_URL: jdbc:postgresql://db:5432/topdownsurvival
@@ -45,7 +46,8 @@ services:
       - server
     restart: unless-stopped
 
-  # The admin portal (map editor). Saving needs ADMIN_TOKEN set for the server.
+  # The admin portal (map editor, live games, history), behind its own login. Needs an admin
+  # account: set ADMIN_USERNAME/ADMIN_PASSWORD for the server.
   admin:
     build:
       context: .

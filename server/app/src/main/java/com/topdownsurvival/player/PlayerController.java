@@ -29,10 +29,12 @@ public class PlayerController {
 
     private final PlayerRepository players;
     private final PlayerAuth auth;
+    private final PlayerActivity activity;
 
-    public PlayerController(PlayerRepository players, PlayerAuth auth) {
+    public PlayerController(PlayerRepository players, PlayerAuth auth, PlayerActivity activity) {
         this.players = players;
         this.auth = auth;
+        this.activity = activity;
     }
 
     @PostMapping
@@ -52,5 +54,12 @@ public class PlayerController {
         p.setName(req.name());
         players.save(p);
         return new PlayerView(p.getId(), p.getName());
+    }
+
+    /** The app's heartbeat while it's open, so the admin portal can show who's online. */
+    @PostMapping("/me/seen")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void seen(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+        activity.seen(auth.require(authorization).getId());
     }
 }

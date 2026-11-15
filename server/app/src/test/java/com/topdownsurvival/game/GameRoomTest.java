@@ -26,7 +26,30 @@ class GameRoomTest {
     int recordedRound = -1;
     int recordedPartySize = -1;
 
-    final ScoreRecorder scores = (mapId, round, partySize, results) -> {
+    /** Every history call, as "started ABCD 2", "left <name> 3 120", "ended over 3 [..]". */
+    final List<String> history = new ArrayList<>();
+    final GameRecorder recorder = new GameRecorder() {
+        @Override
+        public void started(GameStart game) {
+            history.add("started " + game.roomCode() + " " + game.seats().size());
+        }
+
+        @Override
+        public void left(UUID gameId, Standing standing, java.time.Instant at) {
+            history.add("left " + name(standing.playerId()) + " " + standing.kills() + " " + standing.points());
+        }
+
+        @Override
+        public void ended(UUID gameId, String reason, int round, java.time.Instant at, List<Standing> standings) {
+            history.add("ended " + reason + " " + round + " " + standings.stream().map(s -> name(s.playerId())).toList());
+        }
+    };
+
+    String name(UUID account) {
+        return account.equals(alice) ? "alice" : account.equals(bob) ? "bob" : "?";
+    }
+
+    final ScoreRecorder scores = (gameId, mapId, round, partySize, results) -> {
         recorded.add(results);
         recordedRound = round;
         recordedPartySize = partySize;
@@ -55,7 +78,7 @@ class GameRoomTest {
     }
 
     GameRoom room(boolean solo, Executor background) {
-        return new GameRoom("ABCD", FakeConnection.map("house"), 3, solo, scores, background, clock, () -> 42, listener);
+        return new GameRoom("ABCD", FakeConnection.map("house"), 3, solo, scores, recorder, background, clock, () -> 42, listener);
     }
 
     /** A solo room in play, with zombies held off. */
@@ -327,9 +350,9 @@ class GameRoomTest {
 
     @Test
     void aFailedScoreWriteStillEndsTheGame() {
-        GameRoom r = new GameRoom("ABCD", FakeConnection.map("house"), 1, true, (_, _, _, _) -> {
+        GameRoom r = new GameRoom("ABCD", FakeConnection.map("house"), 1, true, (_, _, _, _, _) -> {
             throw new IllegalStateException("db down");
-        }, Runnable::run, clock, () -> 1, listener);
+        }, recorder, Runnable::run, clock, () -> 1, listener);
         r.join(alice, "Alice", aliceConn);
         r.start(alice);
         r.sim().damagePlayer(r.sim().players.getFirst(), 1e6);
@@ -353,7 +376,7 @@ class GameRoomTest {
         assertThat(r.state()).isEqualTo(GameRoom.State.PLAYING);
         assertThat(r.start(alice)).isNotNull();
 
-        pending.forEach(Runnable::run);
+        while (!pending.isEmpty()) pending.removeFirst().run(); // each write queues the next
         r.tick();
         assertThat(aliceConn.last(ServerMessage.GameOver.class).players().getFirst().rank()).isEqualTo(7);
         assertThat(r.state()).isEqualTo(GameRoom.State.LOBBY);
@@ -373,7 +396,7 @@ class GameRoomTest {
         assertThat(r.state()).isEqualTo(GameRoom.State.LOBBY);
 
         // The late write changes nothing.
-        pending.forEach(Runnable::run);
+        while (!pending.isEmpty()) pending.removeFirst().run(); // each write queues the next
         r.tick();
         assertThat(aliceConn.all(ServerMessage.GameOver.class)).hasSize(1);
     }
@@ -428,5 +451,121 @@ class GameRoomTest {
         r.pause(alice, true);
         ticks(r, 5);
         assertThat(r.currentTick()).isEqualTo(5);
+    }
+
+    // ------------------------------------------------------------------ history
+
+    @Test
+    void historyRecordsAGameFromStartToGameOver() {
+        GameRoom r = soloGame();
+        r.sim().rounds.round = 4;
+        first(r).kills = 5;
+        r.sim().damagePlayer(first(r), 1e6);
+        r.tick();
+        assertThat(history).containsExactly("started ABCD 1", "ended over 3 [alice]");
+    }
+
+    @Test
+    void historyRecordsPlayersLeavingAndAnAbandonedGame() {
+        GameRoom r = duoGame();
+        r.sim().players.get(1).kills = 4;
+        r.sim().players.get(1).economy.earned = 250;
+        r.leave(bob);
+        assertThat(history).containsExactly("started ABCD 2", "left bob 4 250");
+        r.leave(alice);
+        assertThat(history).hasSize(4);
+        assertThat(history.get(2)).startsWith("left alice");
+        assertThat(history.get(3)).startsWith("ended abandoned").endsWith("[]");
+        assertThat(recorded).isEmpty();
+    }
+
+    @Test
+    void historyRecordsACrash() {
+        GameRoom r = soloGame();
+        r.withSim(sim -> sim.zombies.add(null));
+        r.tick();
+        assertThat(r.state()).isEqualTo(GameRoom.State.LOBBY);
+        assertThat(history).containsExactly("started ABCD 1", "ended crashed 0 [alice]");
+    }
+
+    @Test
+    void historyWritesWaitForEachOther() {
+        List<Runnable> pending = new ArrayList<>();
+        GameRoom r = room(true, pending::add);
+        r.join(alice, "Alice", aliceConn);
+        r.start(alice);
+        r.sim().damagePlayer(first(r), 1e6);
+        r.tick();
+        // Only the first write is queued; the scores and the end follow it, in order.
+        assertThat(pending).hasSize(1);
+        while (!pending.isEmpty()) pending.removeFirst().run();
+        assertThat(history).containsExactly("started ABCD 1", "ended over 0 [alice]");
+        assertThat(recorded).hasSize(1);
+    }
+
+    // ------------------------------------------------------------------ admin
+
+    @Test
+    void spectatorsSeeTheGameButPlayersAreNeverTold() {
+        GameRoom r = duoGame();
+        int aliceBefore = aliceConn.sent.size();
+        FakeConnection admin = new FakeConnection();
+        assertThat(r.watch(admin)).isNull();
+
+        ServerMessage.Watch watch = admin.last(ServerMessage.Watch.class);
+        assertThat(watch.room().code()).isEqualTo("ABCD");
+        assertThat(watch.map().id()).isEqualTo("house");
+        assertThat(watch.lobby().players()).hasSize(2);
+        assertThat(admin.all(Snapshot.class)).hasSize(1);
+        assertThat(aliceConn.sent).hasSize(aliceBefore);
+
+        for (int i = 0; i < GameRoom.SNAPSHOT_EVERY * 2; i++) r.tick();
+        assertThat(admin.all(Snapshot.class)).hasSize(3);
+        // Players get exactly what they'd get without a watcher: snapshots, no lobby changes.
+        assertThat(aliceConn.sent.subList(aliceBefore, aliceConn.sent.size())).noneMatch(m -> m instanceof ServerMessage.Lobby);
+        assertThat(aliceConn.last(Snapshot.class).players()).hasSize(2);
+
+        assertThat(r.summary().spectators()).isEqualTo(1);
+        r.unwatch(admin);
+        assertThat(r.summary().spectators()).isZero();
+    }
+
+    @Test
+    void spectatorsDontKeepAnEmptyRoomOpen() {
+        GameRoom r = soloGame();
+        FakeConnection admin = new FakeConnection();
+        r.watch(admin);
+        r.leave(alice);
+        assertThat(r.isClosed()).isTrue();
+        assertThat(admin.closed).isTrue();
+        assertThat(r.watch(new FakeConnection())).isNotNull();
+    }
+
+    @Test
+    void spectatorsDontStopASoloGameFromPausing() {
+        GameRoom r = soloGame();
+        r.watch(new FakeConnection());
+        r.disconnected(alice, aliceConn);
+        long at = r.currentTick();
+        r.tick();
+        assertThat(r.currentTick()).isEqualTo(at);
+    }
+
+    @Test
+    void summaryListsMembersAndTheirStanding() {
+        GameRoom r = duoGame();
+        first(r).kills = 3;
+        GameRoom.LiveRoom live = r.summary();
+        assertThat(live.state()).isEqualTo("playing");
+        assertThat(live.gameId()).isNotNull();
+        assertThat(live.members()).extracting(GameRoom.LiveMember::name).containsExactly("Alice", "Bob");
+        assertThat(live.members().getFirst().owner()).isTrue();
+        assertThat(live.members().getFirst().kills()).isEqualTo(3);
+        assertThat(live.members().getFirst().state()).isEqualTo("alive");
+
+        GameRoom lobby = room(false);
+        lobby.join(alice, "Alice", new FakeConnection());
+        assertThat(lobby.summary().state()).isEqualTo("lobby");
+        assertThat(lobby.summary().members().getFirst().state()).isNull();
     }
 }

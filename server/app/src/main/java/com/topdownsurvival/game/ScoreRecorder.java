@@ -7,6 +7,6 @@ import java.util.UUID;
 public interface ScoreRecorder {
     record Result(UUID playerId, int kills, int points) {}
 
-    /** Saves one row per result and returns each one's 0-based leaderboard position, in order. */
-    List<Integer> record(String mapId, int round, int partySize, List<Result> results);
+    /** Saves one row per result (tagged with the game) and returns each one's 0-based leaderboard position, in order. */
+    List<Integer> record(UUID gameId, String mapId, int round, int partySize, List<Result> results);
 }
