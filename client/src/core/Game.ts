@@ -1,5 +1,5 @@
 import { sound } from '../audio/Sound';
-import { loadIdentity, startHeartbeat, type MapSummary } from '../net/api';
+import { loadIdentity, refreshMe, startHeartbeat, type MapSummary } from '../net/api';
 import type { Link } from '../net/Connection';
 import { NetGame } from '../net/NetGame';
 import type { GameResult, LobbyPlayer, NetEvent, ServerMessage } from '../net/protocol';
@@ -183,6 +183,12 @@ export class Game {
     this.resumeBy = 0;
   }
 
+  /** After signing in, up or out (always from the title menu, with no socket open): the next room opens one with the new token. */
+  identityChanged(): void {
+    this.world = restingWorld(this.level, this.you, loadIdentity()?.name ?? '');
+    void this.scores.refresh();
+  }
+
   /** Back to the title menu, out of any room, with the default map resting behind it. */
   toMenu(notice = ''): void {
     this.leaveRoom();
@@ -254,6 +260,7 @@ export class Game {
 
   start(): void {
     startHeartbeat();
+    void refreshMe();
     requestAnimationFrame((t) => {
       this.last = t;
       requestAnimationFrame(this.frame);

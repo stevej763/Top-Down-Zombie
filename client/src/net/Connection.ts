@@ -1,4 +1,4 @@
-import { ensureRegistered, loadIdentity } from './api';
+import { ensureRegistered, loadIdentity, needsLogin } from './api';
 import { wsUrl } from './server';
 import type { ClientMessage, ServerMessage } from './protocol';
 
@@ -86,7 +86,7 @@ export class Connection implements Link {
     const id = await ensureRegistered(this.verify);
     if (!this.wanted || generation !== this.generation) return;
     if (!id?.token) {
-      this.problem = loadIdentity() ? "Can't reach the server" : 'Pick a name first';
+      this.problem = needsLogin() ? 'Log in again' : loadIdentity() ? "Can't reach the server" : 'Pick a name first';
       this.retry();
       return;
     }
